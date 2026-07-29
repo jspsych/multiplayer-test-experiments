@@ -11,14 +11,11 @@
     <!-- STUDY PROTOTYPE: on the LOCAL adapter for two-tab piloting on one machine. For the paid Prolific
          run, swap adapter-multiplayer-local → adapter-multiplayer-firebase (and pair via a real waiting
          room); nothing else in this file changes. -->
-    <!-- These four load from vendor/ in this repo, NOT from npm: reference-game is unpublished and the
-         published 0.1.0 builds predate the jsPsych.multiplayer namespace migration. Repoint to
-         cdn.jsdelivr.net/npm/... and delete vendor/ once jspsych-multiplayer PR #35 publishes.
-         See vendor/README.md. -->
-    <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@f97f08417cae5441bc5dabb0621c515fb525ac4e/vendor/adapter-multiplayer-local.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@f97f08417cae5441bc5dabb0621c515fb525ac4e/vendor/plugin-multiplayer-sync.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@f97f08417cae5441bc5dabb0621c515fb525ac4e/vendor/plugin-multiplayer-role.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@f97f08417cae5441bc5dabb0621c515fb525ac4e/vendor/plugin-multiplayer-reference-game.js"></script>
+    <!-- TODO: pin to a real published version once jspsych-multiplayer PR #35 (Version Packages) merges -->
+    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/adapter-multiplayer-local@0.1.0/dist/index.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-sync@0.1.0/dist/index.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-role@0.1.0/dist/index.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-reference-game@0.1.0/dist/index.browser.min.js"></script>
     <script src="tangrams.js"></script>
     <link
       rel="stylesheet"
