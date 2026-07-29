@@ -284,28 +284,36 @@ Everything in phase 1 is unblocked, and it is most of the total effort.
 
 ### Phase 1 — now, no upstream dependency
 
-- [ ] 1. **Data egress** (DataPipe/OSF, incremental saves). Highest value per line of code in this
-      document; without it every other fix produces nothing analyzable.
-- [ ] 2. **Dyad + Prolific identifiers** on every row via `addProperties` (`dyad_id`,
-      `PROLIFIC_PID`, `STUDY_ID`, `SESSION_ID`).
-- [ ] 3. **Timeout-based dropout detection + abort path** (N consecutive `ended_by: "timeout"` →
-      flush data → "partner disconnected" screen → partial completion code). Kills the 71-minute
-      grind with no presence API.
-- [ ] 4. **Lobby timeout + no-match exit + payment path**, and fix the spectator dead-end.
-- [ ] 5. **Prolific wrapper**: consent, instructions with partner-expectation framing, comprehension
-      check, debrief, three completion codes, mobile block. All before the lobby.
-- [ ] 6. **Decide the partial-data policy** — it changes what #3 does, so settle it early.
+- [ ] [#3](https://github.com/jspsych/multiplayer-test-experiments/issues/3) — **Data egress**
+      (DataPipe/OSF, incremental saves). Highest value per line of code in this document; without it
+      every other fix produces nothing analyzable.
+- [ ] [#4](https://github.com/jspsych/multiplayer-test-experiments/issues/4) — **Dyad + Prolific
+      identifiers** on every row via `addProperties` (`dyad_id`, `PROLIFIC_PID`, `STUDY_ID`,
+      `SESSION_ID`).
+- [ ] [#5](https://github.com/jspsych/multiplayer-test-experiments/issues/5) — **Timeout-based
+      dropout detection + abort path** (N consecutive `ended_by: "timeout"` → flush data → "partner
+      disconnected" screen → partial completion code). Kills the 71-minute grind with no presence API.
+- [ ] [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6) — **Lobby timeout +
+      no-match exit + payment path**, and fix the spectator dead-end.
+- [ ] [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) — **Prolific wrapper**:
+      consent, instructions with partner-expectation framing, comprehension check, debrief, three
+      completion codes, mobile block. All before the lobby.
+- [ ] [#8](https://github.com/jspsych/multiplayer-test-experiments/issues/8) — **Decide the
+      partial-data policy.** It changes what #5 does, so settle it early.
 
 ### Phase 2 — after `adapter-multiplayer-firebase` publishes
 
-- [ ] 7. **Fix `SEED` derivation for Firebase** (§1). Do this *in the same change* as the adapter
-      swap, or you will collect a wave of confounded data that looks fine.
-- [ ] 8. Build the **rolling waiting room** (room bucketing, stale-room expiry, odd-arrival
-      handling). Largest remaining piece.
-- [ ] 9. **Verify whether presence is exposed**; if so, upgrade #3 from timeout-inference to real
-      disconnect detection.
+- [ ] [#9](https://github.com/jspsych/multiplayer-test-experiments/issues/9) — **Fix `SEED`
+      derivation for Firebase** (§1). Do this *in the same change* as the adapter swap, or you will
+      collect a wave of confounded data that looks fine.
+- [ ] [#10](https://github.com/jspsych/multiplayer-test-experiments/issues/10) — Build the
+      **rolling waiting room** (room bucketing, stale-room expiry, odd-arrival handling). Largest
+      remaining piece.
+- [ ] [#11](https://github.com/jspsych/multiplayer-test-experiments/issues/11) — **Verify whether
+      presence is exposed**; if so, upgrade #5 from timeout-inference to real disconnect detection.
 
 ### Phase 3
 
-- [ ] 10. **Two-device pilot with real strangers**, deliberately including a scripted mid-round
-      dropout, before spending money.
+- [ ] [#12](https://github.com/jspsych/multiplayer-test-experiments/issues/12) — **Two-device pilot
+      with real strangers**, deliberately including a scripted mid-round dropout, before spending
+      money.
