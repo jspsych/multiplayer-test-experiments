@@ -8,9 +8,12 @@
     <script src="https://unpkg.com/@jspsych/plugin-survey-text"></script>
     <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response"></script>
     <script src="https://unpkg.com/@jspsych/plugin-preload"></script>
-    <!-- STUDY PROTOTYPE: on the LOCAL adapter for two-tab piloting on one machine. For the paid Prolific
-         run, swap adapter-multiplayer-local → adapter-multiplayer-firebase (and pair via a real waiting
-         room); nothing else in this file changes. -->
+    <!-- STUDY PROTOTYPE: on the LOCAL adapter for two-tab piloting on one machine. NOT ready for a paid
+         run — see READINESS.md. Swapping adapter-multiplayer-local → adapter-multiplayer-firebase is
+         NOT sufficient on its own, and is not a drop-in: `SEED` below reads ?mp_session=, which the
+         LocalAdapter constructor generates and Firebase will not, so every dyad would silently share
+         one trial order; `persistParticipant` is LocalAdapter-only; and pairing needs a rolling
+         waiting room that sync/role do not provide. -->
     <!-- These four load from vendor/ in this repo, NOT from npm: reference-game is unpublished and the
          published 0.1.0 builds predate the jsPsych.multiplayer namespace migration. Repoint to
          cdn.jsdelivr.net/npm/... and delete vendor/ once jspsych-multiplayer PR #35 publishes.

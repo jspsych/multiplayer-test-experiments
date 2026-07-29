@@ -45,13 +45,20 @@ These currently run on `adapter-multiplayer-local` (no backend needed) for two-t
    into a second tab so a second player joins.
 4. The first tab becomes the director, the second the matcher.
 
-For a paid Prolific run, swap `adapter-multiplayer-local` for
-[`adapter-multiplayer-firebase`](https://github.com/jspsych/jspsych-multiplayer/tree/main/packages/adapter-multiplayer-firebase)
-(one script-tag swap, see the header comment in each file) plus a real waiting room for pairing.
+## Running it as a paid study
 
-**Note on package versions:** the `@jspsych-multiplayer/*` package script tags below are pinned to
-`0.1.0` on jsDelivr, but those packages are not yet published to npm — publishing is gated on
+**Not yet possible — see [`READINESS.md`](READINESS.md)** for a full audit. In short: there is no
+pairing mechanism for strangers, no partner-dropout handling, and no data save target, and
+cross-device pairing is gated on the unpublished
+[`adapter-multiplayer-firebase`](https://github.com/jspsych/jspsych-multiplayer/tree/main/packages/adapter-multiplayer-firebase).
+
+Swapping the adapter is **not** a one-script-tag change: `SEED` is derived from the `?mp_session=`
+param that the *local* adapter generates, so on Firebase every dyad would silently receive the same
+trial order. `READINESS.md` lists what actually has to change, and which items are blocked upstream.
+
+**Note on package versions:** the four `@jspsych-multiplayer/*` bundles load from
+[`vendor/`](vendor/README.md) in this repo, not npm — `plugin-multiplayer-reference-game` is
+unpublished and the other three have only pre-namespace-migration `0.1.0` releases, which do not work
+with the pinned core. Publishing is gated on
 [jspsych-multiplayer PR #35](https://github.com/jspsych/jspsych-multiplayer/pull/35) ("Version
-Packages") merging. Until then, either build the packages from a local checkout of
-jspsych-multiplayer and swap in relative `dist/` paths, or wait for the publish and confirm the
-pinned version still matches.
+Packages"). Do not repoint these to npm until that merges.
