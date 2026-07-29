@@ -29,6 +29,11 @@ Built with `npm run build` from `jspsych/jspsych-multiplayer` at commit
 [`69c0d7b`](https://github.com/jspsych/jspsych-multiplayer/commit/69c0d7b).
 Each file is that package's `dist/index.browser.min.js`, renamed.
 
+The experiment files load these over jsDelivr, SHA-pinned to the commit that added
+them (`5046bf0`). If you rebuild and recommit the bundles, you must also bump that
+SHA in both HTML files — jsDelivr caches `/gh/` paths by commit, so an unchanged
+pin will keep serving the old build.
+
 ## Removing this directory
 
 Once [PR #35 ("Version Packages")](https://github.com/jspsych/jspsych-multiplayer/pull/35)
