@@ -20,6 +20,10 @@ Hawkins' block-wise shortening.
 
 ---
 
+See also **[`DECISIONS.md`](DECISIONS.md)** — every open decision in one table with a suggested
+answer and what it costs to reverse, plus the publish-time launch checklist. Read that first if you
+want the decisions rather than the reasoning behind them.
+
 ## Contents
 
 - [1. Pairing](#1-pairing) — blocked upstream, and bigger than "one script-tag swap"
