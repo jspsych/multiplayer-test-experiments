@@ -204,26 +204,46 @@ documentation on 2026-07-30 — re-check before launch, since policy changes.
 | Rule | Consequence for us |
 | --- | --- |
 | **Prolific provides no matching infrastructure**, and explicitly does not guarantee successful pairing. Places fill first-come, first-served off ambient traffic. | The waiting room ([#10](https://github.com/jspsych/multiplayer-test-experiments/issues/10)) is entirely ours to build *and to prove*. Nothing about pairing can be assumed to work because the platform "handles it" — it does not. This is the single strongest argument for [#12](https://github.com/jspsych/multiplayer-test-experiments/issues/12) being a hard gate rather than a formality. |
-| **Unmatched participants must be paid a partial payment**, minimum **£0.10/$0.14 per minute** of waiting. | Sets a floor on the no-match payment in [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6), tied directly to the lobby timeout value. A 5-minute timeout implies ≥ £0.50. |
+| **Unmatched participants must be paid a partial payment**, minimum **$0.14 per minute** of waiting. | A *floor*, not a target — see the payment note below. Tied directly to the lobby timeout value in [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6): a 5-minute timeout implies ≥ $0.70. |
 | **Unmatched participants must not be rejected.** | The approve/pay policy in [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) is constrained, not discretionary. |
 | **Expected waiting time must be included in the advertised study duration and in payment.** | The lobby timeout is not just a UX number — it sets the advertised duration. Choose it before writing the study description, not after. |
 | **Identifiers must be recorded to link paired responses.** | Independent confirmation that [#4](https://github.com/jspsych/multiplayer-test-experiments/issues/4) is mandatory rather than merely advisable. |
-| **In-study screening is permitted only via the built-in custom screening feature or a two-study design.** Screen-outs get a fixed reward (min £0.10), are auto-approved on a correct code, and use a screen-out slot limit that auto-pauses the study. | Screened-out participants need their **own completion code** — hence four codes, not three. |
+| **In-study screening is permitted only via the built-in custom screening feature or a two-study design.** Screen-outs get a fixed reward (min $0.14), are auto-approved on a correct code, and use a screen-out slot limit that auto-pauses the study. | Screened-out participants need their **own completion code** — hence four codes, not three. |
 | **The screen-out reward cannot be changed once the study is published.** | Belongs on a pre-launch checklist; it is not recoverable afterwards. |
+| **Returned submissions are not rejections.** Participants may return a study at any time, for any reason, without penalty — Prolific advises researchers to *return rather than reject* precisely to protect a participant's approval rate. | **There is no platform filter for serial returners.** The approval-rate prescreener catches people who get rejected, not people who abandon. Mid-task abandonment — the failure mode that costs us two payments and a dyad — is therefore invisible to Prolific's screening and has to be addressed in our own design (§4 pre-lobby framing, [#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13)) and survived by the abort path ([#5](https://github.com/jspsych/multiplayer-test-experiments/issues/5)). |
 
-**Suggested (tentative) consequence for payment design:** keep the per-minute waiting rate at or
-*below* the per-minute task rate. At the §5 figures the task pays ≈£0.15/min against a £0.10/min
-waiting floor, so waiting is already the less attractive option — but raising the no-match payment to
-feel generous would invert that and reward being unmatched over participating.
+**Suggested (tentative) consequence for payment design: pay the no-match exit at the full task rate,
+not at the $0.14/min floor.** The floor is badly misaligned with participants' actual incentives. A
+participant who has waited and been paid $0.70 for it can instead return the study at no penalty and
+take a two-minute survey for more — so a floor-rate no-match payment actively teaches people to
+abandon the lobby the moment matching feels slow, which is exactly when we most need them to stay.
+
+At the §5 rate of $15.00/hr, paying the wait at the task rate makes a 5-minute no-match exit $1.25
+(≈$1.66 all-in) instead of $0.70. Because unmatched participants are a small fraction of the total,
+the absolute cost is on the order of $10–15 across a full run — negligible against the pairing yield
+it buys.
+
+Note that this does *not* create an incentive to prefer being unmatched: participants have no way to
+influence whether they match, so there is no action the higher rate rewards. The only behaviour it
+changes is whether waiting beats leaving, which is the behaviour we want to change.
 
 ---
 
 ## 5. Cost
 
-Assuming Prolific's £9.00/hr recommended rate and a 33% service fee on participant pay.
+All amounts are in **USD**, since that is the currency participants are paid in. Prolific's own
+thresholds are $8.00/hr minimum and $12.00/hr recommended.
 
-**C&WG** (~25 min: instructions + comprehension + lobby + 6 trials) → £3.75/participant,
-**£4.99 all-in**. Attrition is multiplicative on dyads; at ~15% per-participant mid-task dropout
+**Suggested (tentative) rate: $15.00/hr**, above Prolific's recommendation. The task is 25 minutes of
+sustained real-time coordination with another person and no ability to pause, and attention *is* the
+measurement here. Rate also partly pays for itself: dropout is multiplicative on dyads, so if better
+pay moves per-participant dropout from 15% to 10%, dyad survival goes 0.72 → 0.81 and the number of
+dyads you must start falls from ~28 to ~25 — recovering roughly a third of the extra cost.
+
+A 33% Prolific service fee applies on top of participant pay throughout.
+
+**C&WG** (~25 min: instructions + comprehension + lobby + 6 trials) → $6.25/participant,
+**$8.31 all-in**. Attrition is multiplicative on dyads; at ~15% per-participant mid-task dropout
 (reasonable for a 25-min synchronous task with good framing), dyad survival ≈ 0.72:
 
 | | for 20 usable dyads |
@@ -232,15 +252,15 @@ Assuming Prolific's £9.00/hr recommended rate and a 33% service fee on particip
 | participants recruited | ~56 |
 | of which usable | 40 |
 | **paid but unusable** | **~16** (dropouts + their stranded survivors) |
-| **cost** | **~£280** |
+| **cost** | **~$465** |
 
-Add ~10–15% for unmatched-in-lobby participants who must be paid prorated, plus headroom for one
-wasted session while learning real arrival-rate and attrition numbers. **Budget ~£350 for the first
-real run.**
+Add the no-match exits (~10–15% of participants at ~$1.66 all-in each, so roughly $10–15 — see §4),
+plus headroom for one wasted session while learning real arrival-rate and attrition numbers.
+**Budget ~$580 for the first real run.**
 
-**Hawkins** (~55 min) → £8.25/participant, **£10.97 all-in**, and 72 synchronous trials realistically
+**Hawkins** (~55 min) → $13.75/participant, **$18.29 all-in**, and 72 synchronous trials realistically
 push per-participant dropout to ~30%, so dyad survival ≈ 0.49 → ~41 dyads → ~82 participants →
-**~£900** for the same 20 dyads. Three-plus times the cost, with the §2 survivor-grind failure mode
+**~$1,500** for the same 20 dyads. Three-plus times the cost, with the §2 survivor-grind failure mode
 at its worst.
 
 ### Two structural cost levers, both large
@@ -337,6 +357,16 @@ is a suggested starting point for the submission, not a settled position.
   paid and must not be rejected. Stating the policy in the protocol up front avoids a mismatch
   between what IRB approved and what the completion codes in
   [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) actually do.
+- **Question to put to IRB: should data use be re-consented after the fact?** Suggested position is
+  **no** — consent is taken once, up front, and withdrawal runs through the normal route. The reason
+  is that a post-hoc opt-in is a selection filter: stranded survivors are likelier to decline than
+  completers, and being stranded correlates with the DV (longer, more effortful sessions), so
+  re-consent would preferentially delete the high end of the measure. Post-hoc re-consent *is*
+  standard for **deception** studies, where the debrief reveals that the original consent was not
+  fully informed; this study is not one, so that rationale does not carry over. If IRB prefers
+  re-consent anyway, it must be offered **identically to every participant**, not only to those
+  whose partner left — and note that identical wording still does not equalise decline *rates*
+  between groups, so log the decline rate by exit type to keep the bias measurable.
 
 **Suggested sequencing:** draft the protocol in parallel with phase 1 rather than after it. The
 consent and debrief text is needed by #13 anyway, and writing it early surfaces the withdrawal and
