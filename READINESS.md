@@ -282,6 +282,33 @@ Tracked separately because these cannot be unblocked from this repo.
 
 Everything in phase 1 is unblocked, and it is most of the total effort.
 
+### Agreed execution order
+
+The phases below group by *upstream dependency*, which is not the same as the order to work in.
+The order we settled on, and why:
+
+1. **#8** — decide the partial-data policy. No code; determines whether #5 salvages or just exits,
+   and whether #3 must save per-round or only on abort. Do it before writing either.
+2. **#3** — data egress. Nothing else is observable without it, and #5 needs a flush target.
+3. **#4** — identifiers. Same code region as #3; near-worthless before it, near-free after.
+4. **#7** — completion codes + redirect. Unblocks the payment paths in #5 and #6.
+5. **#5** — dropout abort. Highest attrition value of the unblocked work, and by now it has both a
+   flush target and an exit to redirect to.
+6. **#6** — lobby timeout. Reuses #5's exit screens, so it is cheap once those exist.
+7. **#13** — the participant-facing wrapper. Largest unblocked chunk, but depends on nothing:
+   start it in parallel any time after step 1.
+
+Then the phase-2 gate: **#11** before **#10**, because whether presence is exposed changes how ghost
+expiry gets built (`onDisconnect` tombstones if yes, a staleness sweep if no). **#9** ships in the
+same commit as the adapter swap. **#12** last.
+
+**Do phase 1 against `reference-game-cwg.html` only.** The two files are near-duplicates and every
+phase-1 item applies to both, but C&WG is the first paid run (§5) and back-porting to Hawkins before
+the pilot means writing every fix twice against assumptions the pilot may invalidate. Factoring the
+shared plumbing into a common module is the right end state, but two concrete implementations are a
+better basis for that extraction than one speculative one. Re-cost Hawkins only after #12 replaces
+the assumed 15% / 30% dropout figures in §5 with observed ones.
+
 ### Phase 1 — now, no upstream dependency
 
 - [ ] [#3](https://github.com/jspsych/multiplayer-test-experiments/issues/3) — **Data egress**
@@ -295,9 +322,12 @@ Everything in phase 1 is unblocked, and it is most of the total effort.
       disconnected" screen → partial completion code). Kills the 71-minute grind with no presence API.
 - [ ] [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6) — **Lobby timeout +
       no-match exit + payment path**, and fix the spectator dead-end.
-- [ ] [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) — **Prolific wrapper**:
-      consent, instructions with partner-expectation framing, comprehension check, debrief, three
-      completion codes, mobile block. All before the lobby.
+- [ ] [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) — **Completion codes +
+      submission redirect** (three codes: complete / partner-dropped / no-match). Small, and a
+      blocking dependency of both #5 and #6 — neither payment path can be built without it.
+- [ ] [#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13) — **Prolific
+      wrapper**: consent, instructions with partner-expectation framing, comprehension check,
+      debrief, mobile block. All before the lobby. Split out of #7; depends on nothing.
 - [ ] [#8](https://github.com/jspsych/multiplayer-test-experiments/issues/8) — **Decide the
       partial-data policy.** It changes what #5 does, so settle it early.
 
