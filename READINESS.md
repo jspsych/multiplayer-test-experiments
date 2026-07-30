@@ -27,6 +27,7 @@ Hawkins' block-wise shortening.
 - [3. Data](#3-data) — no save target exists
 - [4. Prolific plumbing](#4-prolific-plumbing) — absent
 - [5. Cost](#5-cost)
+- [6. Ethics / IRB](#6-ethics--irb) — not started, and the longest lead time of anything here
 - [What's fine](#whats-fine)
 - [Blocked on unpublished packages](#blocked-on-unpublished-packages)
 - [Work plan](#work-plan)
@@ -275,6 +276,50 @@ Tracked separately because these cannot be unblocked from this repo.
 3. **`plugin-multiplayer-reference-game` is unpublished**, and the other three have only
    pre-namespace-migration `0.1.0` releases. Gated on
    [jspsych-multiplayer PR #35](https://github.com/jspsych/jspsych-multiplayer/pull/35).
+
+---
+
+## 6. Ethics / IRB
+
+Not started. It belongs in this document because IRB approval is a hard blocker on a paid run, and
+it has the **longest lead time of anything listed here** — every other item is days of work, this one
+is weeks of someone else's queue. Starting it late is what actually delays a launch.
+
+The generic protocol items (consent, withdrawal, data handling) are assumed. What follows is the
+short list of things that are unusual about *this* study and that a reviewer will stop on. All of it
+is a suggested starting point for the submission, not a settled position.
+
+- **Free-text chat between strangers is unmoderated user-generated content.** Two anonymous
+  participants type arbitrary text to each other in real time, and we retain it verbatim because
+  `chat_transcript` *is* the primary DV. Most single-participant studies never have this
+  conversation. Expect to be asked what happens if someone types something abusive or
+  self-identifying, and to have an answer about reporting and about researcher review of
+  transcripts before analysis.
+- **Participant-entered display names are shown to a stranger.** `nameTrial` currently collects
+  free text and renders it to the partner. Assigning neutral labels ("Partner A") removes the
+  problem outright and is cheaper than defending it — see
+  [#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13).
+- **Right to withdraw is genuinely complicated in a dyad**, and this is the question most likely to
+  come back with revisions. One participant withdrawing takes their partner's data with them: the
+  transcript is jointly produced and every DV is dyad-level, so there is no clean way to remove one
+  person's contribution. Decide in advance whether withdrawal deletes the whole dyad (defensible,
+  expensive) or retains the partner's rows under the original consent (cheaper, needs justifying in
+  the consent text itself). Whichever is chosen has to be stated to participants *before* they play.
+- **Data transfer.** DataPipe → OSF means participant text leaves for third-party, likely US-hosted
+  infrastructure. With a UK/EU participant pool that is a GDPR question, and it lands on
+  [#3](https://github.com/jspsych/multiplayer-test-experiments/issues/3), which is first in the
+  build order — so confirm the hosting position before building on it rather than after.
+- **Transcript retention and release.** Free text can contain anything; decide the retention period
+  and whether transcripts can ever be published as-is or only in aggregate.
+- **Payment policy for participants who are screened out, unmatched, or stranded by a partner's
+  dropout.** Prolific's own rules already constrain this (§4, §5): unmatched participants must be
+  paid and must not be rejected. Stating the policy in the protocol up front avoids a mismatch
+  between what IRB approved and what the completion codes in
+  [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) actually do.
+
+**Suggested sequencing:** draft the protocol in parallel with phase 1 rather than after it. The
+consent and debrief text is needed by #13 anyway, and writing it early surfaces the withdrawal and
+retention decisions while they are still cheap to act on.
 
 ---
 
