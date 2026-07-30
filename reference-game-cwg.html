@@ -8,9 +8,12 @@
     <script src="https://unpkg.com/@jspsych/plugin-survey-text"></script>
     <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response"></script>
     <script src="https://unpkg.com/@jspsych/plugin-preload"></script>
-    <!-- STUDY PROTOTYPE: on the LOCAL adapter for two-tab piloting on one machine. For the paid Prolific
-         run, swap adapter-multiplayer-local → adapter-multiplayer-firebase (and pair via a real waiting
-         room); nothing else in this file changes. -->
+    <!-- STUDY PROTOTYPE: on the LOCAL adapter for two-tab piloting on one machine. NOT ready for a paid
+         run. Swapping adapter-multiplayer-local → adapter-multiplayer-firebase is NOT sufficient on its
+         own, and is not a drop-in: `SEED` and `DYAD_ID` below both read ?mp_session=, which the
+         LocalAdapter constructor generates and Firebase will not, so every dyad would silently share one
+         trial order; `persistParticipant` is LocalAdapter-only; and pairing needs a rolling waiting room
+         that sync/role do not provide. -->
     <!-- These four load from vendor/ in this repo, NOT from npm: reference-game is unpublished and the
          published 0.1.0 builds predate the jsPsych.multiplayer namespace migration. Repoint to
          cdn.jsdelivr.net/npm/... and delete vendor/ once jspsych-multiplayer PR #35 publishes.
@@ -60,6 +63,44 @@
     // Faithful is 6 trials. Lower for a quick two-tab smoke test, then restore to 6.
     const TRIALS = 6;
 
+    // ===============================================================================================
+    // RUN CONFIG — every value that has to agree with the Prolific study configuration.
+    //
+    // Deliberately one block, because these are decisions rather than code, and several of them
+    // CANNOT BE CHANGED once a Prolific study is published (the reward, the screen-out reward, the
+    // advertised duration). Keeping them in one place is what makes them reviewable and what keeps
+    // participant-facing copy from drifting away from what is actually configured.
+    //
+    // See DECISIONS.md (group B, "locked at publish") and the launch checklist there.
+    // ===============================================================================================
+    const CONFIG = {
+      // --- Prolific completion codes. Created with the study; paste them here. -------------------
+      // FOUR codes, not one: every exit has to be separately reconcilable, and three of the four are
+      // paths where the participant did NOT finish but must still be paid.
+      COMPLETION_CODES: {
+        complete: "", // TODO(#7): finished the game
+        partner_dropped: "", // TODO(#7): survivor of a dropout (#5)
+        no_match: "", // TODO(#7): lobby timeout or spectator overflow (#6)
+        screened_out: "", // TODO(#7): failed the exposure item or declined the commitment gate (#13)
+      },
+
+      // --- Timing -------------------------------------------------------------------------------
+      // NOT in the original C&WG design — bounds a round if the partner leaves. Watch this in
+      // piloting: trial 1 of a 12-figure board is the longest in the study, and a cap that truncates
+      // it would bite exactly where the effect is largest.
+      ROUND_TIMEOUT_MS: 180000,
+
+      // --- Data ---------------------------------------------------------------------------------
+      // TODO(#3): DataPipe experiment ID. Until this is set there is NO data egress except the
+      // voluntary download button on the final screen, i.e. every participant who does not finish
+      // contributes nothing.
+      DATAPIPE_EXPERIMENT_ID: "",
+
+      // Where the study is hosted, for the Prolific redirect. Kept here so it is obvious that the
+      // production value has to be a real https URL, not a file:// path.
+      PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
+    };
+
     const jsPsych = initJsPsych();
     const localAdapter = new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
 
@@ -77,6 +118,109 @@
     // 6 trials, each a fresh random order of all 12. Deterministic given the seed, so both tabs agree
     // without exchanging anything.
     const SCHEDULE = Tangrams.fullBoardSchedule(TRIALS, SEED);
+
+    // ===============================================================================================
+    // PROLIFIC IDENTIFIERS AND PROVENANCE (#4)
+    //
+    // Prolific requires that identifiers be recorded so paired responses can be linked, and without
+    // them collected data cannot be reconciled against submissions in order to approve payment.
+    // ===============================================================================================
+
+    // Prolific appends these to the study URL. Read from the ORIGINAL query string, which is safe:
+    // the LocalAdapter's replaceState preserves existing params when it adds ?mp_session=.
+    const prolificParams = new URLSearchParams(location.search);
+    const PROLIFIC_PID = prolificParams.get("PROLIFIC_PID");
+    const STUDY_ID = prolificParams.get("STUDY_ID");
+    const SESSION_ID = prolificParams.get("SESSION_ID");
+
+    // The dyad identifier. Read from the same source as SEED and for the same reason: it is the one
+    // value both partners share. Note the coupling — whatever fixes SEED for Firebase (#9) has to fix
+    // this in the same change, or rows will carry a dyad id that does not identify a dyad.
+    const DYAD_ID = prolificParams.get("mp_session");
+
+    // Attach to EVERY row. Analysis here is entirely dyad-level, so a row that cannot be traced to a
+    // pair is not analysable; and a row that cannot be traced to a PROLIFIC_PID cannot be paid for.
+    jsPsych.data.addProperties({
+      prolific_pid: PROLIFIC_PID,
+      study_id: STUDY_ID,
+      session_id: SESSION_ID,
+      dyad_id: DYAD_ID,
+      // Own participant id, so the two sides of a dyad are distinguishable within it.
+      participant_id: localAdapter?.participantId ?? null,
+      // Run provenance — needed to interpret data collected while piloting at different values.
+      experiment_file: "reference-game-cwg.html",
+      config_trials: TRIALS,
+      config_n_stimuli: N,
+      config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
+      // A 6×2 tangram grid on a small screen is a different task. Captured so that can be checked
+      // rather than assumed, and so a mobile block (#13) can be verified to have worked.
+      viewport_w: window.innerWidth,
+      viewport_h: window.innerHeight,
+      screen_w: window.screen?.width ?? null,
+      screen_h: window.screen?.height ?? null,
+      user_agent: navigator.userAgent,
+    });
+
+    // ===============================================================================================
+    // PROLIFIC SUBMISSION (#7)
+    //
+    // Without this NO participant can submit at all, including one who plays the whole game. Built as
+    // standalone helpers rather than inline in the final screen, because #5 and #6 both need to exit
+    // from paths that never reach `doneTrial`.
+    // ===============================================================================================
+
+    // The code is always shown as selectable text alongside the button. If the redirect is blocked —
+    // popup blocker, embedded webview, flaky network — a visible code still lets the participant
+    // submit manually. A stranded participant with no code is the failure this whole issue exists to
+    // remove, so it should not be reintroduced by trusting `location.href` to work.
+    function submissionBlockHTML(codeKey) {
+      const code = CONFIG.COMPLETION_CODES[codeKey];
+      if (!code) {
+        return `<p style="color:#b00"><strong>Configuration error:</strong> no completion code is set
+                for <code>${codeKey}</code>. Please contact the researcher — do not close this tab.</p>`;
+      }
+      return `<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
+              <p style="font-size:0.9em">If that button does not work, your completion code is
+              <code style="user-select:all">${code}</code> — paste it into Prolific to submit.</p>`;
+    }
+
+    function redirectToProlific(codeKey) {
+      const code = CONFIG.COMPLETION_CODES[codeKey];
+      if (!code) {
+        console.error(`No Prolific completion code configured for "${codeKey}".`);
+        return;
+      }
+      window.location.href = `${CONFIG.PROLIFIC_SUBMIT_URL}?cc=${encodeURIComponent(code)}`;
+    }
+
+    function wireSubmissionButton(codeKey) {
+      document
+        .getElementById("prolific-submit")
+        ?.addEventListener("click", () => redirectToProlific(codeKey));
+    }
+
+    // Fail loudly at startup rather than at the moment a participant tries to submit. Unset codes are
+    // the kind of thing that looks fine in a two-tab smoke test and strands a paid participant later.
+    (function warnOnUnsetConfig() {
+      const unset = Object.entries(CONFIG.COMPLETION_CODES)
+        .filter(([, v]) => !v)
+        .map(([k]) => k);
+      if (unset.length) {
+        console.warn(
+          `[config] Completion codes not set: ${unset.join(", ")}. ` +
+            `Participants reaching those exits will not be able to submit.`
+        );
+      }
+      if (!CONFIG.DATAPIPE_EXPERIMENT_ID) {
+        console.warn(
+          "[config] No DATAPIPE_EXPERIMENT_ID (#3). There is no data egress except the voluntary " +
+            "download button — every participant who does not finish will contribute nothing."
+        );
+      }
+      if (!PROLIFIC_PID) {
+        console.warn("[config] No PROLIFIC_PID in the URL. Expected when testing locally.");
+      }
+    })();
 
     // The 12 tangrams are real PNGs, and `rt` is a reported DV — without this the first exposure to
     // each image loads mid-trial. `stimuli` is an OBJECT parameter, so jsPsych's automatic media
@@ -161,7 +305,7 @@
       // order, revision behavior. The core word-count DV doesn't need it, but it's ~free and matches
       // the Hawkins file.
       save_interaction_history: true,
-      round_timeout: 180000, // NOT in the original — bounds the round if the partner leaves (see header)
+      round_timeout: CONFIG.ROUND_TIMEOUT_MS, // NOT in the original — see CONFIG and the header
       prompt: (role) =>
         role === "director"
           ? "<p><strong>You are the Director.</strong> Describe your tangrams in badge order (1, 2, 3, …) so your partner can arrange theirs the same way. You can talk back and forth as much as you need.</p>"
@@ -186,10 +330,18 @@
                 <p>Together you scored <strong>${total} / ${played * N}</strong> across ${played} trial${
           played === 1 ? "" : "s"
         }.</p>
-                <p>You may close this tab. <button id="dl">Download data (JSON)</button></p>`;
+                <p>Thank you — please submit to complete the study.</p>
+                ${submissionBlockHTML("complete")}
+                <p style="font-size:0.85em;color:#666">
+                  Researcher tools: <button id="dl" type="button">Download data (JSON)</button>
+                </p>`;
       },
       choices: "NO_KEYS",
       on_load: () => {
+        wireSubmissionButton("complete");
+        // Retained as a local fallback while there is no save target (#3). Once DataPipe is wired,
+        // this is a debugging convenience rather than the only egress — it should NOT be the thing a
+        // participant is relied upon to click.
         document
           .getElementById("dl")
           ?.addEventListener("click", () =>
