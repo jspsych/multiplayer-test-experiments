@@ -198,19 +198,24 @@ Minor:
 ### Prolific's own rules for dyadic studies
 
 These are **platform policy, not our design choices**, and several of them constrain issues that are
-already open. Recorded here so they are not rediscovered late. Verified against Prolific's researcher
-documentation on 2026-07-30 — re-check before launch, since policy changes.
+already open. Recorded here so they are not rediscovered late.
 
-| Rule | Consequence for us |
-| --- | --- |
-| **Prolific provides no matching infrastructure**, and explicitly does not guarantee successful pairing. Places fill first-come, first-served off ambient traffic. | The waiting room ([#10](https://github.com/jspsych/multiplayer-test-experiments/issues/10)) is entirely ours to build *and to prove*. Nothing about pairing can be assumed to work because the platform "handles it" — it does not. This is the single strongest argument for [#12](https://github.com/jspsych/multiplayer-test-experiments/issues/12) being a hard gate rather than a formality. |
-| **Unmatched participants must be paid a partial payment**, minimum **$0.14 per minute** of waiting. | A *floor*, not a target — see the payment note below. Tied directly to the lobby timeout value in [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6): a 5-minute timeout implies ≥ $0.70. |
-| **Unmatched participants must not be rejected.** | The approve/pay policy in [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) is constrained, not discretionary. |
-| **Expected waiting time must be included in the advertised study duration and in payment.** | The lobby timeout is not just a UX number — it sets the advertised duration. Choose it before writing the study description, not after. |
-| **Identifiers must be recorded to link paired responses.** | Independent confirmation that [#4](https://github.com/jspsych/multiplayer-test-experiments/issues/4) is mandatory rather than merely advisable. |
-| **In-study screening is permitted only via the built-in custom screening feature or a two-study design.** Screen-outs get a fixed reward (min $0.14), are auto-approved on a correct code, and use a screen-out slot limit that auto-pauses the study. | Screened-out participants need their **own completion code** — hence four codes, not three. |
-| **The screen-out reward cannot be changed once the study is published.** | Belongs on a pre-launch checklist; it is not recoverable afterwards. |
-| **Returned submissions are not rejections.** Participants may return a study at any time, for any reason, without penalty — Prolific advises researchers to *return rather than reject* precisely to protect a participant's approval rate. | **There is no platform filter for serial returners.** The approval-rate prescreener catches people who get rejected, not people who abandon. Mid-task abandonment — the failure mode that costs us two payments and a dyad — is therefore invisible to Prolific's screening and has to be addressed in our own design (§4 pre-lobby framing, [#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13)) and survived by the abort path ([#5](https://github.com/jspsych/multiplayer-test-experiments/issues/5)). |
+Every row cites the Prolific help-centre article it came from, all verified 2026-07-30. **Re-check
+before launch** — this is policy, it changes, and Prolific's help-centre URLs are not stable, so
+articles are cited by title as well as link in the [Sources](#sources) list below.
+
+| Rule | Consequence for us | Source |
+| --- | --- | --- |
+| **Prolific provides no matching infrastructure**, and explicitly does not guarantee successful pairing. Places fill first-come, first-served off ambient traffic. | The waiting room ([#10](https://github.com/jspsych/multiplayer-test-experiments/issues/10)) is entirely ours to build *and to prove*. Nothing about pairing can be assumed to work because the platform "handles it" — it does not. This is the single strongest argument for [#12](https://github.com/jspsych/multiplayer-test-experiments/issues/12) being a hard gate rather than a formality. | [D] |
+| **Unmatched participants must be paid a partial payment**, minimum **$0.14 per minute** of waiting. | A *floor*, not a target — see the payment note below. Tied directly to the lobby timeout value in [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6): a 5-minute timeout implies ≥ $0.70. | [D] |
+| **Unmatched participants must not be rejected.** | The approve/pay policy in [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) is constrained, not discretionary. | [D] |
+| **Expected waiting time must be included in the advertised study duration and in payment.** | The lobby timeout is not just a UX number — it sets the advertised duration. Choose it before writing the study description, not after. | [D] |
+| **Identifiers must be recorded to link paired responses.** | Independent confirmation that [#4](https://github.com/jspsych/multiplayer-test-experiments/issues/4) is mandatory rather than merely advisable. | [D] |
+| **In-study screening is permitted only via the built-in custom screening feature or a two-study design.** Screen-outs get a fixed reward (min $0.14), are auto-approved on a correct code, and use a screen-out slot limit that auto-pauses the study. | Screened-out participants need their **own completion code** — hence four codes, not three. | [S] |
+| **The screen-out reward is duration-scaled**, not flat: $0.14 is the minimum for a screener taking **one minute or less**, so ~$0.28 at two minutes and ~$0.42 at three. | Set it from a measured pilot duration and **round up**, since it cannot be changed later. Every pre-gate item — consent, description, screening questions — counts as screening time, which is what makes brevity before the commitment gate load-bearing rather than cosmetic ([#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13)). | [P] |
+| **The screen-out reward may not exceed the full study reward.** | A hard cap rather than guidance. Not binding at ~$0.28 against $6.25, but worth knowing before anyone proposes a generous screen-out. | [S] |
+| **The screen-out reward cannot be changed once the study is published.** | Belongs on a pre-launch checklist; it is not recoverable afterwards. | [S] |
+| **Returned submissions are not rejections.** Participants may return a study at any time, for any reason, without penalty — Prolific advises researchers to *return rather than reject* precisely to protect a participant's approval rate. | **There is no platform filter for serial returners.** The approval-rate prescreener catches people who get rejected, not people who abandon. Mid-task abandonment — the failure mode that costs us two payments and a dyad — is therefore invisible to Prolific's screening and has to be addressed in our own design (§4 pre-lobby framing, [#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13)) and survived by the abort path ([#5](https://github.com/jspsych/multiplayer-test-experiments/issues/5)). | [R] |
 
 **Suggested (tentative) consequence for payment design: pay the no-match exit at the full task rate,
 not at the $0.14/min floor.** The floor is badly misaligned with participants' actual incentives. A
@@ -223,16 +228,32 @@ At the §5 rate of $15.00/hr, paying the wait at the task rate makes a 5-minute 
 the absolute cost is on the order of $10–15 across a full run — negligible against the pairing yield
 it buys.
 
-Note that this does *not* create an incentive to prefer being unmatched: participants have no way to
-influence whether they match, so there is no action the higher rate rewards. The only behaviour it
-changes is whether waiting beats leaving, which is the behaviour we want to change.
+This does not create an incentive to prefer being unmatched, because participants cannot influence
+whether they match. There is one adjacent case worth being precise about: once the commitment gate
+([#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13)) exists, someone who does
+not intend to complete the study *can* choose between taking the screen-out exit now and entering the
+lobby hoping to go unmatched. That gamble still loses — it costs up to five minutes of waiting to
+maybe win $1.25, against a certain payment available immediately for zero minutes, and a match leaves
+them choosing between 25 unwanted minutes and a return for nothing. The sure thing dominates, which
+is why the screen-out reward does **not** need to be inflated to compete with the no-match payment.
+
+#### Sources
+
+All Prolific researcher help-centre articles, verified 2026-07-30:
+
+- **[D]** [Can I run dyadic studies on Prolific?](https://researcher-help.prolific.com/en/articles/445177-dyadic-studies)
+- **[S]** [How to use custom screening to recruit specific participants](https://researcher-help.prolific.com/en/articles/445155-how-to-use-custom-screening-to-recruit-specific-participants)
+- **[P]** [How much should I pay participants?](https://researcher-help.prolific.com/en/articles/445266-how-much-should-i-pay-participants)
+- **[R]** [Approving, rejecting, and returning submissions](https://researcher-help.prolific.com/en/articles/445208-approving-rejecting-and-returning-submissions)
+- **[M]** [Prolific's payment model](https://researcher-help.prolific.com/en/articles/445230-prolific-s-payment-model) — the $8.00/hr minimum and $12.00/hr recommended rates used in §5
+- [Can I make partial payments to participants?](https://researcher-help.prolific.com/en/articles/445234-can-i-make-partial-payments-to-participants)
 
 ---
 
 ## 5. Cost
 
 All amounts are in **USD**, since that is the currency participants are paid in. Prolific's own
-thresholds are $8.00/hr minimum and $12.00/hr recommended.
+thresholds are $8.00/hr minimum and $12.00/hr recommended ([source](https://researcher-help.prolific.com/en/articles/445230-prolific-s-payment-model), verified 2026-07-30).
 
 **Suggested (tentative) rate: $15.00/hr**, above Prolific's recommendation. The task is 25 minutes of
 sustained real-time coordination with another person and no ability to pause, and attention *is* the
