@@ -28,6 +28,7 @@ Hawkins' block-wise shortening.
 - [4. Prolific plumbing](#4-prolific-plumbing) — absent
 - [5. Cost](#5-cost)
 - [6. Ethics / IRB](#6-ethics--irb) — not started, and the longest lead time of anything here
+- [7. Pre-registration](#7-pre-registration) — must be locked before the first paid participant
 - [What's fine](#whats-fine)
 - [Blocked on unpublished packages](#blocked-on-unpublished-packages)
 - [Work plan](#work-plan)
@@ -139,9 +140,39 @@ Consequences:
   that already says "You may close this tab." Most will not.
 - You are paying for data you will not receive.
 
-**Fix (unblocked, do first):** jsPsych DataPipe (`pipe.jspsych.org` → OSF) needs roughly five lines.
-Wire it to **incremental** saving, not only `on_finish` — with pair-based attrition, `on_finish`-only
-saving loses exactly the sessions that matter. Save per-round, or on the abort path.
+**Fix (unblocked, do first):** jsPsych DataPipe (`pipe.jspsych.org` → OSF). Wire it to
+**incremental** saving, not only `on_finish` — with pair-based attrition, `on_finish`-only saving
+loses exactly the sessions that matter. Save per-round, and on the abort path.
+
+### DataPipe's session counter is a live hazard — decide `limitSessions` deliberately
+
+The public docs describe only the `jsPsychPipe` plugin's `save` action, a single trial at the end of
+the experiment. Incremental saving works, but the endpoint behaves in a way the docs do not mention.
+Read from source (`jspsych/datapipe`, `origin/main`, `functions/src/api-data.ts`, 2026-07-30):
+
+**`sessions` increments on every successful save call, not once per participant.** The cap is checked
+before anything else, and exceeding it returns a 400 and drops the data. So one C&WG participant
+saving per round consumes **7 sessions** (6 rounds + final flush), not 1.
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| **`limitSessions` off** *(suggested)* | Cannot silently truncate a run. Recruitment is already capped by Prolific places, which is the control that actually matters. | No backstop if a bug causes runaway saves, or if the experiment ID leaks and someone else posts to it. |
+| **`limitSessions` on, sized to *saves*** | Keeps a backstop against runaway saves. | Requires computing participants × (rounds + 2) with headroom, and re-computing it whenever `TRIALS` or the save granularity changes. Getting it wrong fails **silently and mid-run**. |
+| **`limitSessions` on, sized to *participants*** | — | **Actively dangerous.** Looks correct, caps the run after roughly a seventh of the sample, and every save after that is lost with no participant-visible error. |
+
+**Suggested: leave `limitSessions` off** for the first run, since Prolific's places cap already bounds
+recruitment and the failure mode of the alternative is silent mid-run data loss. If a backstop is
+wanted, size it to saves and put the arithmetic on the launch checklist.
+
+Two further consequences for [#3](https://github.com/jspsych/multiplayer-test-experiments/issues/3),
+detailed there:
+
+- **Filenames must be globally unique**, with a nonce rather than just a round number — an OSF 409
+  is the one failure path that is *not* queued for retry, so a collision loses that round for good.
+- **Everything else is retried.** `persistPending()` writes to Cloud Storage before the OSF upload,
+  and network/OSF errors queue and return 202. So a transient failure at abort time does not lose
+  data, which is why the redirect in
+  [#5](https://github.com/jspsych/multiplayer-test-experiments/issues/5) should never block on a save.
 
 ### Content gaps once egress exists
 
@@ -394,6 +425,46 @@ is a suggested starting point for the submission, not a settled position.
 **Suggested sequencing:** draft the protocol in parallel with phase 1 rather than after it. The
 consent and debrief text is needed by #13 anyway, and writing it early surfaces the withdrawal and
 retention decisions while they are still cheap to act on.
+
+---
+
+## 7. Pre-registration
+
+Not started, and it has a **hard deadline that nothing else here has**: a pre-registration must be
+locked *before the first paid participant*, not before analysis. That makes it the real deadline on
+the [#8](https://github.com/jspsych/multiplayer-test-experiments/issues/8) analysis decision, which
+is otherwise the most deferrable item in the work plan.
+
+OSF is the natural venue, and the data already lands there via DataPipe (§3) — register the
+pre-registration against the same OSF project so the two are linked rather than discovered separately
+later.
+
+### What it requires that we do not currently have
+
+- [ ] **Sample size with a justification.** §5 works throughout to "20 usable dyads", but that number
+      is an *assumption carried through a cost model*, not a derivation. Nothing in this repo powers
+      it. A pre-registration needs a power analysis, or an explicit and defensible statement that the
+      target is resource-constrained rather than power-derived — the latter is acceptable and honest,
+      but it has to be said rather than implied.
+- [ ] **The analysis plan**, i.e. the #8 decision: mixed-effects with trial as a continuous predictor
+      versus a trial-1-vs-final contrast, and whether partial dyads enter the primary analysis or
+      only a robustness check.
+- [ ] **Exclusion criteria**, stated in advance: minimum completed trials for a partial dyad, prior
+      tangram exposure, comprehension-check failure, and dyads ended by the #5 abort path.
+- [ ] **Hypotheses and DVs** — words/messages per figure across trials, accuracy — which the file
+      header comments already state clearly and can largely be lifted from.
+- [ ] **A stopping rule.** This is the one most likely to be missed. Powering for completers-only
+      (§5) exists precisely so that topping up after seeing data is never tempting, because that is
+      optional stopping.
+
+### The staged launch must be declared
+
+[#12](https://github.com/jspsych/multiplayer-test-experiments/issues/12) proposes launching ~3–4
+dyads, pausing to inspect, then releasing the rest. That is sound practice, but an undeclared pause
+mid-collection looks exactly like a peek — so the pre-registration should state that the pause
+happens, that its checklist is **operational only**, and that the decision it gates is "does the
+instrumentation work" rather than anything about the DV. Declared in advance it is a quality control
+step; discovered afterwards it is a credibility problem.
 
 ---
 
