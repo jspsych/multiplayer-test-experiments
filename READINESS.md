@@ -169,7 +169,7 @@ prose mentions in `README.md` and the HTML header comments.
 | --- | --- |
 | PID / STUDY_ID / SESSION_ID capture from URL | **missing** |
 | Completion-code redirect (`app.prolific.com/submissions/complete?cc=…`) | **missing** — no participant can submit at all |
-| Separate codes for complete / partner-dropped / no-match | **missing** (all three are needed) |
+| Separate codes for complete / partner-dropped / no-match / screened-out | **missing** (all four are needed — see below) |
 | Consent form | **missing** |
 | Instructions | **missing** — the only task explanation is the one-line `prompt` on the game screen |
 | Comprehension check | **missing** |
@@ -194,6 +194,27 @@ Minor:
 - [ ] `jsPsychPreload` defaults to halting on error. One 404 in `assets/tangrams/` leaves a paid
       participant dead in the water with no completion code. Set `on_error` /
       `continue_after_error` deliberately.
+
+### Prolific's own rules for dyadic studies
+
+These are **platform policy, not our design choices**, and several of them constrain issues that are
+already open. Recorded here so they are not rediscovered late. Verified against Prolific's researcher
+documentation on 2026-07-30 — re-check before launch, since policy changes.
+
+| Rule | Consequence for us |
+| --- | --- |
+| **Prolific provides no matching infrastructure**, and explicitly does not guarantee successful pairing. Places fill first-come, first-served off ambient traffic. | The waiting room ([#10](https://github.com/jspsych/multiplayer-test-experiments/issues/10)) is entirely ours to build *and to prove*. Nothing about pairing can be assumed to work because the platform "handles it" — it does not. This is the single strongest argument for [#12](https://github.com/jspsych/multiplayer-test-experiments/issues/12) being a hard gate rather than a formality. |
+| **Unmatched participants must be paid a partial payment**, minimum **£0.10/$0.14 per minute** of waiting. | Sets a floor on the no-match payment in [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6), tied directly to the lobby timeout value. A 5-minute timeout implies ≥ £0.50. |
+| **Unmatched participants must not be rejected.** | The approve/pay policy in [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) is constrained, not discretionary. |
+| **Expected waiting time must be included in the advertised study duration and in payment.** | The lobby timeout is not just a UX number — it sets the advertised duration. Choose it before writing the study description, not after. |
+| **Identifiers must be recorded to link paired responses.** | Independent confirmation that [#4](https://github.com/jspsych/multiplayer-test-experiments/issues/4) is mandatory rather than merely advisable. |
+| **In-study screening is permitted only via the built-in custom screening feature or a two-study design.** Screen-outs get a fixed reward (min £0.10), are auto-approved on a correct code, and use a screen-out slot limit that auto-pauses the study. | Screened-out participants need their **own completion code** — hence four codes, not three. |
+| **The screen-out reward cannot be changed once the study is published.** | Belongs on a pre-launch checklist; it is not recoverable afterwards. |
+
+**Suggested (tentative) consequence for payment design:** keep the per-minute waiting rate at or
+*below* the per-minute task rate. At the §5 figures the task pays ≈£0.15/min against a £0.10/min
+waiting floor, so waiting is already the less attractive option — but raising the no-match payment to
+feel generous would invert that and reward being unmatched over participating.
 
 ---
 
