@@ -50,7 +50,9 @@
     //
     // Every parameter above was verified against the paper + hawkrobe/tangrams code. The one departure
     // is not a design choice: `round_timeout` (60s) has no counterpart in the original, which ran
-    // untimed. It exists so a disconnected or absent partner cannot hang the trial forever. Rounds it
+    // untimed. It was added so a disconnected or absent partner cannot hang the trial forever — but it
+    // is an UNCONDITIONAL wall-clock bound armed when the round starts, ending every round at that
+    // value whether or not anyone dropped. It is not a dropout detector. Rounds it
     // ends are recorded as `ended_by: "timeout"` with a null assignment — filter on that when
     // analysing, and raise it if piloting shows real trials running long.
     //
@@ -163,7 +165,7 @@
       // Guarantees a referring expression per trial and blocks blind-guessing.
       require_message_before_response: true,
       show_running_score: true,
-      round_timeout: 60000, // NOT in the original — bounds the round if the partner leaves (see header)
+      round_timeout: 60000, // NOT in the original — unconditional bound on EVERY round (see header)
       save_interaction_history: true,
       prompt: (role) =>
         role === "director"
