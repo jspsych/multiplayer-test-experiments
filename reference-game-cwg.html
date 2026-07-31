@@ -97,10 +97,32 @@
       ROUND_TIMEOUT_MS: 180000,
 
       // --- Data ---------------------------------------------------------------------------------
-      // TODO(#3): DataPipe experiment ID. Until this is set there is NO data egress except the
-      // voluntary download button on the final screen, i.e. every participant who does not finish
-      // contributes nothing.
+      // TODO(#15): DataPipe experiment ID, from the experiment dashboard. The egress layer below is
+      // built and tested, but SAVING IS INERT UNTIL THIS IS SET — it warns rather than posting, which
+      // is safer than a placeholder that uploads to an unintended project. Until it is filled in,
+      // every participant who does not click the download button contributes nothing.
       DATAPIPE_EXPERIMENT_ID: "",
+
+      // A4 — save per-round chunks rather than once at the end. A single end-of-run save loses
+      // everything for any dyad that breaks, which is exactly the population #12 needs to
+      // characterise. Assumes `limitSessions` is OFF (B4): DataPipe's counter increments per SAVE
+      // CALL, so per-round saving spends ~7 sessions per participant, and a limit sized to
+      // participants would cap the run a seventh of the way through and drop later saves silently.
+      SAVE_PER_ROUND: true,
+
+      // A3 — the abort path flushes unconditionally. The one irreversible decision in the register:
+      // unflushed rows are gone forever, flushed rows can always be ignored in analysis.
+      FLUSH_ON_ABORT: true,
+
+      // Retry policy. Only transient faults are retried — see classify() for why 202 and 4xx must
+      // not be, which is not obvious and was checked against DataPipe's source.
+      SAVE_MAX_ATTEMPTS: 3,
+      SAVE_BASE_BACKOFF_MS: 500,
+
+      // A save must never hold up a redirect to Prolific (#5, #7). An unpaid participant is a worse
+      // outcome than a late chunk — and the chunk usually is not lost, since DataPipe queues its own
+      // retry server-side.
+      SAVE_REDIRECT_BUDGET_MS: 3000,
 
       // Where the study is hosted, for the Prolific redirect. Kept here so it is obvious that the
       // production value has to be a real https URL, not a file:// path.
@@ -233,8 +255,8 @@
       }
       if (!CONFIG.DATAPIPE_EXPERIMENT_ID) {
         console.warn(
-          "[config] No DATAPIPE_EXPERIMENT_ID (#3). There is no data egress except the voluntary " +
-            "download button — every participant who does not finish will contribute nothing."
+          "[config] No DATAPIPE_EXPERIMENT_ID (#15). Data egress is wired but INERT — nothing will " +
+            "be uploaded, so every participant who does not click the download button contributes nothing."
         );
       }
       if (!PROLIFIC_PID) {
@@ -254,6 +276,218 @@
         );
       }
     })();
+
+    // ===============================================================================================
+    // DATA EGRESS (#3) — DataPipe → OSF, incremental per-round saves
+    //
+    // Written against DataPipe's server source (jspsych/datapipe, functions/src/api-data.ts) rather
+    // than the plugin's example snippet, because the response semantics are genuinely counterintuitive
+    // and determine whether retrying is correct or actively harmful:
+    //
+    //   201  Created  — uploaded to OSF.
+    //   202  Accepted — the OSF upload FAILED, but DataPipe persisted the data and queued it for its
+    //                   own server-side retry. This is a SUCCESS for us; retrying would duplicate rows.
+    //   400  OSF_FILE_EXISTS — filename collided. NOT queued for retry; the one path where data is
+    //                   genuinely dropped. Hence the nonce in every filename (A4).
+    //   400  SESSION_LIMIT_REACHED / INVALID_DATA / EXPERIMENT_NOT_FOUND / PROVIDER_NOT_CONNECTED —
+    //                   configuration errors, not transient faults. Retrying burns the redirect
+    //                   budget and still loses the data; the fix is on the dashboard (B4).
+    //   5xx / 429 / network — genuinely transient. The only ones worth retrying.
+    //
+    // Classification keys on the STATUS CLASS, not on error strings, so an upstream change that adds
+    // a new 4xx (the in-flight provider-migration branch adds PROVIDER_NOT_CONNECTED) is handled
+    // correctly without a change here.
+    // ===============================================================================================
+    const DATAPIPE_ENDPOINT = "https://pipe.jspsych.org/api/data/";
+
+    const Pipeline = (() => {
+      // High-water mark: every row before this index has been CLAIMED by some save. It only ever
+      // advances. Rows from a save that failed are tracked separately, in `pending`, rather than by
+      // winding this back.
+      //
+      // Winding it back is the obvious implementation and it is WRONG, because saves do not fail in
+      // the order they were issued. Subtracting a count from a shared cursor is only correct if the
+      // failing save is the most recent claimant; when an earlier save fails after a later one has
+      // already claimed rows, the cursor lands short, permanently dropping the earliest rows while
+      // re-sending the later ones. That is not exotic — the per-round save is not awaited and can
+      // retry for seconds, so a slow round-6 save overlapping the end-of-run flush is the ordinary
+      // end of a session. It also fails SILENTLY, because the overlapping row ranges it produces are
+      // exactly what breaks the contiguity check that would otherwise catch it.
+      let savedThrough = 0;
+      // Ranges [start, end] (inclusive) from saves that failed, awaiting a later attempt. The next
+      // save takes these along with any new rows, so nothing is stranded and nothing is duplicated.
+      let pending = [];
+      let chunkSeq = 0;
+      const log = [];
+
+      // Defensive only: DYAD_ID now carries the same fallback SEED does, so this cannot currently be
+      // reached. Kept because a filename containing the literal "null" is unrecoverable in a way a
+      // redundant `??` is not — but it is NOT load-bearing, and the fix belongs at DYAD_ID.
+      const dyadKey = () => DYAD_ID ?? SEED;
+
+      // Deliberately NOT the Prolific PID. OSF file listings are browsable without opening any file,
+      // so a PID in a filename publishes a directory of participant identifiers — a different and
+      // broader exposure than the same value sitting inside a saved row. Reconciliation still works,
+      // because the payload carries the PID. See D3/D6 in DECISIONS.md, both open with IRB.
+      const participantKey = () => localAdapter?.participantId ?? "anon";
+
+      const configured = () => !!CONFIG.DATAPIPE_EXPERIMENT_ID;
+
+      // Fresh per SAVE, never per attempt and never derived from the round number. Two distinct saves
+      // must not collide (OSF answers a duplicate with 409, the one unrecoverable failure); the
+      // retries WITHIN one save must collide, which is what makes them idempotent — see the replay
+      // case in post().
+      const nonce = () =>
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+      function classify(status) {
+        // Any 2xx is success. DataPipe currently answers 201 or 202, but treating an unexpected 200
+        // as a failure would requeue rows that did land and duplicate them — the failure mode this
+        // module works hardest to avoid, caused by nothing worse than an upstream tightening.
+        if (status >= 200 && status < 300) return "ok";
+        if (status === 429 || status >= 500) return "retry";
+        return "terminal";
+      }
+
+      async function post(filename, payload) {
+        let lastDetail = null;
+
+        for (let attempt = 1; attempt <= CONFIG.SAVE_MAX_ATTEMPTS; attempt++) {
+          try {
+            const response = await fetch(DATAPIPE_ENDPOINT, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Accept: "*/*" },
+              // keepalive lets an in-flight save survive the page navigating to Prolific. Capped at
+              // 64KB by spec, which per-round chunks stay well under — another reason A4's chunking
+              // is load-bearing rather than merely tidy.
+              keepalive: true,
+              body: JSON.stringify({
+                experimentID: CONFIG.DATAPIPE_EXPERIMENT_ID,
+                filename,
+                data: payload,
+              }),
+            });
+
+            const verdict = classify(response.status);
+            if (verdict === "ok") return { ok: true, status: response.status, attempt };
+
+            const body = await response.json().catch(() => ({}));
+            lastDetail = { status: response.status, error: body.error ?? null };
+
+            // Idempotent replay. Every attempt here posts the SAME filename, so a collision on a
+            // RETRY means our own earlier attempt did land at OSF and only its response was lost.
+            // Treating that as failure would requeue the rows and re-send them under a fresh nonce,
+            // duplicating them — the exact outcome the nonce exists to prevent. A collision on the
+            // FIRST attempt is a genuine clash with another session and stays terminal.
+            if (body.error === "OSF_FILE_EXISTS" && attempt > 1) {
+              console.warn(`[pipeline] ${filename} already landed on an earlier attempt; treating as saved.`);
+              return { ok: true, status: response.status, attempt, replayed: true };
+            }
+
+            if (verdict === "terminal") {
+              console.error(`[pipeline] ${filename} rejected (terminal):`, lastDetail);
+              return { ok: false, ...lastDetail, attempt };
+            }
+
+            const retryAfter = Number(response.headers.get("Retry-After"));
+            const backoff =
+              Number.isFinite(retryAfter) && retryAfter > 0
+                ? retryAfter * 1000
+                : CONFIG.SAVE_BASE_BACKOFF_MS * 2 ** (attempt - 1);
+            await new Promise((r) => setTimeout(r, backoff));
+          } catch (e) {
+            // Network fault — indistinguishable from a 5xx here, and treated the same.
+            lastDetail = { status: null, error: String(e) };
+            await new Promise((r) =>
+              setTimeout(r, CONFIG.SAVE_BASE_BACKOFF_MS * 2 ** (attempt - 1))
+            );
+          }
+        }
+
+        console.error(`[pipeline] ${filename} exhausted retries:`, lastDetail);
+        return { ok: false, ...lastDetail, attempt: CONFIG.SAVE_MAX_ATTEMPTS };
+      }
+
+      // `label` names the exit path, so a chunk's provenance is legible from its filename alone:
+      // round-3, abort-partner-dropped, no-match, complete.
+      async function save(label) {
+        if (!configured()) {
+          console.warn(`[pipeline] No DATAPIPE_EXPERIMENT_ID — "${label}" NOT saved (#3).`);
+          return { ok: false, skipped: true };
+        }
+
+        const all = jsPsych.data.get().values();
+
+        // Claim BEFORE any await, so a save triggered while this one is in flight (a round completing
+        // during the end-of-run flush) cannot send the same rows twice. Two things are claimed: every
+        // range left over from an earlier failure, and everything new since the high-water mark.
+        const inherited = pending;
+        pending = [];
+        const ranges = [...inherited];
+        if (all.length > savedThrough) ranges.push([savedThrough, all.length - 1]);
+        savedThrough = Math.max(savedThrough, all.length);
+
+        const rows = ranges.flatMap(([start, end]) => all.slice(start, end + 1));
+        if (rows.length === 0) return { ok: true, empty: true };
+
+        const seq = chunkSeq++;
+        const filename = `cwg_${dyadKey()}_${participantKey()}_${String(seq).padStart(
+          2,
+          "0"
+        )}-${label}_${nonce()}.json`;
+
+        const result = await post(
+          filename,
+          JSON.stringify({
+            dyad_id: dyadKey(),
+            participant_id: participantKey(),
+            // The Prolific id lives here, in the payload, and NOT in the filename — see
+            // participantKey(). Reconciliation reads it from here.
+            prolific_pid: PROLIFIC_PID,
+            chunk_seq: seq,
+            chunk_label: label,
+            // A LIST of inclusive ranges, not a single pair: a chunk may carry rows reclaimed from an
+            // earlier failed save alongside new ones, and those are not contiguous with each other.
+            row_ranges: ranges,
+            saved_at: new Date().toISOString(),
+            trials: rows,
+          })
+        );
+
+        if (!result.ok && !result.skipped) {
+          // Hand the ranges back for a later save to retry. Merged with anything another save queued
+          // while this one was in flight, and re-sorted so chunks stay readable in order. The
+          // end-of-run flush is then the safety net for every earlier failure, at the cost of
+          // re-sending some rows under a new filename — duplicates are recoverable in analysis,
+          // missing rows are not.
+          pending = [...ranges, ...pending].sort((a, b) => a[0] - b[0]);
+        }
+
+        log.push({ filename, label, rows: rows.length, ...result });
+        return result;
+      }
+
+      // Flush for exit paths (A3). Resolves when the save finishes OR when the redirect budget
+      // expires, whichever comes first — a participant must never be held on a spinner waiting for
+      // OSF before they can submit (#7).
+      function flush(label) {
+        return Promise.race([
+          save(label),
+          new Promise((r) =>
+            setTimeout(() => r({ ok: false, timedOut: true }), CONFIG.SAVE_REDIRECT_BUDGET_MS)
+          ),
+        ]);
+      }
+
+      return { save, flush, log: () => log, configured };
+    })();
+
+    // Last-ditch flush for exits we cannot intercept: tab close, browser back, connection loss.
+    // `pagehide` fires where `beforeunload` does not (bfcache, mobile Safari), and the save uses
+    // keepalive so it survives the page going away. Unconditional, per A3.
+    window.addEventListener("pagehide", () => {
+      if (CONFIG.FLUSH_ON_ABORT) Pipeline.save("unload");
+    });
 
     // The 12 tangrams are real PNGs, and `rt` is a reported DV — without this the first exposure to
     // each image loads mid-trial. `stimuli` is an OBJECT parameter, so jsPsych's automatic media
@@ -309,7 +543,12 @@
           stimulus: "<p>This game is already full. Thanks for your interest!</p>",
           choices: "NO_KEYS",
           trial_duration: 4000,
-          on_finish: () => jsPsych.multiplayer.disconnect(),
+          on_finish: () => {
+            // Flush even here. A spectator has no game data, but their arrival and the fact they were
+            // turned away is the raw material for the odd-arrival rate #10's waiting room must handle.
+            if (CONFIG.FLUSH_ON_ABORT) Pipeline.flush("spectator");
+            jsPsych.multiplayer.disconnect();
+          },
         },
       ],
       conditional_function: () => myRole === "spectator",
@@ -339,6 +578,12 @@
       // the Hawkins file.
       save_interaction_history: true,
       round_timeout: CONFIG.ROUND_TIMEOUT_MS, // NOT in the original — see CONFIG and the header
+      // A4 — flush after every round rather than once at the end. A dyad that breaks in round 4 is
+      // exactly the case #12 needs data from, and an end-of-run-only save is the shape that loses it.
+      // Deliberately not awaited: the next round must not wait on OSF.
+      on_finish: (data) => {
+        if (CONFIG.SAVE_PER_ROUND) Pipeline.save(`round-${data.round ?? "?"}`);
+      },
       prompt: (role) =>
         role === "director"
           ? "<p><strong>You are the Director.</strong> Describe your tangrams in badge order (1, 2, 3, …) so your partner can arrange theirs the same way. You can talk back and forth as much as you need.</p>"
@@ -364,6 +609,7 @@
           played === 1 ? "" : "s"
         }.</p>
                 <p>Thank you — please submit to complete the study.</p>
+                <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
                 ${submissionBlockHTML("complete")}
                 <p style="font-size:0.85em;color:#666">
                   Researcher tools: <button id="dl" type="button">Download data (JSON)</button>
@@ -372,9 +618,30 @@
       choices: "NO_KEYS",
       on_load: () => {
         wireSubmissionButton("complete");
-        // Retained as a local fallback while there is no save target (#3). Once DataPipe is wired,
-        // this is a debugging convenience rather than the only egress — it should NOT be the thing a
-        // participant is relied upon to click.
+
+        // Final flush: the last round's rows, plus anything an earlier chunk failed to send. Fired
+        // on_load rather than on_finish because this trial takes no keys and never finishes — the
+        // participant leaves via the submit button. Not awaited before wiring that button: the
+        // redirect must stay available immediately even if OSF is slow or down (#7).
+        Pipeline.flush("complete").then((r) => {
+          const el = document.getElementById("save-status");
+          if (!el) return;
+          // Do not promise a retry that may not happen. A 202 IS retried, by DataPipe, server-side.
+          // A flush that merely ran out of redirect budget may be a dead network, where nothing
+          // retries — so that case gets wording that is true either way rather than a reassurance
+          // that might be false.
+          el.textContent = r.skipped
+            ? "" // no egress configured yet (#15) — say nothing rather than something false
+            : r.ok
+            ? "Your responses have been saved."
+            : r.timedOut
+            ? "Still uploading — you can submit now, this will finish in the background."
+            : "Your responses could not be uploaded. Please submit anyway and message the researcher.";
+        });
+
+        // Retained as a researcher fallback. Now that DataPipe is wired this is a debugging
+        // convenience rather than the only egress — it is NOT something a participant is relied
+        // upon to click.
         document
           .getElementById("dl")
           ?.addEventListener("click", () =>
