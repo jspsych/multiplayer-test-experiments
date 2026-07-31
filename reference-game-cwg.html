@@ -103,6 +103,24 @@
       // every participant who does not click the download button contributes nothing.
       DATAPIPE_EXPERIMENT_ID: "",
 
+      // --- Lobby / no-match (#6) ------------------------------------------------------------------
+      // B6 — how long a participant waits for a partner before being released and paid. NOT merely a
+      // UX number: it sets the advertised study duration (B5), which must include the expected wait,
+      // and it sets what the no-match payment below has to cover. Both are locked at publish, so
+      // this is locked at publish. ~5 min is a starting point, to be refined from observed arrival
+      // rate in the pilot (#12) BEFORE the study is published.
+      LOBBY_TIMEOUT_MS: 300000,
+
+      // B2 — what an unmatched participant is paid. Full task rate for the wait, NOT Prolific's
+      // $0.14/min floor: a floor-rate payment loses to returning the study and taking a short
+      // survey, which teaches people to abandon the lobby at exactly the moment we need them to
+      // stay. Costs ~$10-15 across a whole run.
+      //
+      // Defined ONCE and templated into every screen that quotes it. Participant-facing copy that
+      // disagrees with what is actually configured is the failure this constant exists to prevent,
+      // and it is on the launch checklist for that reason.
+      NO_MATCH_PAYMENT_USD: 1.25,
+
       // --- Dropout detection (#5) ---------------------------------------------------------------
       // Consecutive SILENT rounds before concluding the partner is gone. A round counts as silent
       // only if it timed out AND the partner sent no chat message during it — see the detector for
@@ -565,6 +583,14 @@
     let partnerDropped = false;
     let dropoutRound = null;
 
+    // No-match state (#6). Two different ways of never getting into a game — waiting out the lobby,
+    // and being the odd arrival when a pair has already formed. They share ONE completion code,
+    // because Prolific configures a single code per exit, and stay separable in the data via
+    // `no_match_reason` (A7). The two rates answer different questions: one is about arrival rate,
+    // the other about odd-numbered bursts, and #10's waiting room is sized off both.
+    let noMatch = false;
+    let noMatchReason = null;
+
     // Trials the dyad actually completed, as opposed to rounds the timeline advanced through. Only
     // `ended_by: "submit"` counts — a timed-out round has a null assignment and is not a trial.
     // This is what makes a partial dyad usable rather than merely present (#8).
@@ -591,6 +617,10 @@
         n_trials_completed: completedTrials(),
         n_trials_scheduled: TRIALS,
         dropout_detected_at_round: dropoutRound,
+        // Both no-match routes share one completion code (A7), so this is the only thing that keeps
+        // "nobody arrived" separable from "I was the odd one out" in the data. They answer different
+        // questions and are sized differently in #10.
+        no_match_reason: noMatchReason,
       });
     }
 
@@ -602,13 +632,65 @@
       },
     };
 
+    const money = (usd) => `$${usd.toFixed(2)}`;
+
+    let lobbyTicker = null;
+
     const lobbyTrial = {
       type: jsPsychMultiplayerSync,
       push_data: () => ({ name: myName, joinedAt: Date.now() }),
-      message: `<p>Waiting for ${MIN_PLAYERS} players to join…</p>
-                <p>Open this page in another tab (keep the <code>?mp_session=</code> in the URL) to add a player.</p>`,
+      // An unbounded wait is the whole bug: the plugin's `timeout` default is null, so `wait()` was
+      // called with no bound and an unmatched participant sat here forever — no timeout, no exit, no
+      // completion code, no way to be paid for time they had already given up.
+      timeout: CONFIG.LOBBY_TIMEOUT_MS,
+      message: `<p>Waiting for a partner to join…</p>
+                <p>This study is played in pairs, so we need to match you with someone before we can
+                   start. Most people are matched quickly.</p>
+                <p><strong>Time remaining: <span id="lobby-remaining">—</span></strong></p>
+                <p style="font-size:0.9em;color:#555">If we cannot find you a partner in time, we will
+                   end the study and <strong>still pay you ${money(
+                     CONFIG.NO_MATCH_PAYMENT_USD
+                   )}</strong> for waiting. You do not need to do anything.</p>
+                <p style="font-size:0.85em;color:#888">Testing locally? Open this page in another tab,
+                   keeping the <code>?mp_session=</code> in the URL.</p>`,
       wait_for: (group) =>
         Object.values(group).filter((entry) => entry && entry.name).length >= MIN_PLAYERS,
+      // A countdown, because an indefinite-feeling wait is what makes people abandon. The plugin
+      // renders `message` once and does not update it, so the ticker is driven from here.
+      on_load: () => {
+        // This deadline runs slightly AHEAD of the real one: the plugin calls on_load immediately
+        // after rendering `message`, but only arms its own timer at `wait()`, after `push_data` has
+        // round-tripped. On a slow connection the display therefore reaches zero first — and a
+        // countdown that hits 0:00 and then visibly does nothing is the exact indefinite-feeling
+        // wait this ticker exists to remove. So the last second says what is happening instead of
+        // showing a stopped clock.
+        const deadline = Date.now() + CONFIG.LOBBY_TIMEOUT_MS;
+        const el = document.getElementById("lobby-remaining");
+        const tick = () => {
+          const left = Math.max(0, deadline - Date.now());
+          if (!el) return;
+          if (left < 1000) {
+            el.textContent = "finishing up…";
+            return;
+          }
+          const m = Math.floor(left / 60000);
+          const s = Math.floor((left % 60000) / 1000);
+          el.textContent = `${m}:${String(s).padStart(2, "0")}`;
+        };
+        tick();
+        lobbyTicker = setInterval(tick, 1000);
+      },
+      on_finish: (data) => {
+        clearInterval(lobbyTicker);
+        lobbyTicker = null;
+        if (data.timed_out) {
+          // The sync trial RESOLVES on timeout rather than aborting, so without this flag the
+          // timeline walks straight into roleTrial and waits on its own predicate — swapping an
+          // unbounded lobby for an unbounded pairing screen.
+          noMatch = true;
+          noMatchReason = "lobby_timeout";
+        }
+      },
     };
 
     const roleTrial = {
@@ -625,26 +707,96 @@
         myRole = jsPsychMultiplayerRole.getMyRole();
         const byRole = jsPsychMultiplayerRole.participantsByRole();
         partnerId = myRole === "director" ? byRole.matcher?.[0] : byRole.director?.[0];
+        // Anything that is not a playable role routes to the paid exit. Tested by exclusion rather
+        // than by listing the failures, because the cost of missing one is a participant who reaches
+        // the end of the timeline with no completion code and cannot submit.
+        //
+        // Two ways to get here:
+        //
+        //   spectator_overflow — the odd arrival. Previously a four-second "this game is already
+        //   full" screen followed by disconnect and NO completion code: someone who showed up on
+        //   time, was turned away for reasons entirely outside their control, and then could not be
+        //   paid. It is the same event as a lobby timeout from the participant's side.
+        //
+        //   pairing_timeout — the role plugin's OWN timeout, which defaults to 30s (not null, and
+        //   not unbounded; this file never sets it). On expiry it calls `finishTrial` with
+        //   `role: null`, having already cleared the assignment, so `getMyRole()` returns UNDEFINED
+        //   — the data row and the accessor disagree, which is why this checks for a playable role
+        //   rather than comparing against null. Reachable whenever `ready` stops being satisfiable
+        //   mid-pairing: a partner closes the lobby tab, or their own lobby timed out one tick
+        //   earlier and they have since disconnected. This route predates #5 and #6 and produced a
+        //   codeless exit then too; the difference now is that a paid exit exists to route it to.
+        //
+        // Kept separate in the data because the rates answer different questions — one is odd-
+        // numbered bursts, the other is ghost entries in the lobby (#10) — and are sized differently.
+        if (myRole !== "director" && myRole !== "matcher") {
+          noMatch = true;
+          noMatchReason = myRole === "spectator" ? "spectator_overflow" : "pairing_timeout";
+        }
       },
     };
 
-    const spectatorScreen = {
+    // The sync plugin RESOLVES rather than aborts on timeout, so without a guard the timeline walks
+    // straight into roleTrial after a lobby timeout. That does not hang — the role plugin's timeout
+    // defaults to 30s — but it makes someone already released wait another half minute on a pairing
+    // screen for a partner who was never going to arrive, and then finish with a null role. Skip it.
+    const pairingPhase = {
+      timeline: [roleTrial],
+      conditional_function: () => !noMatch,
+    };
+
+    // The unmatched exit (#6), shared by both no-match routes. Replaces a four-second screen that
+    // gave the spectator no completion code at all, and the lobby's total absence of an exit.
+    //
+    // `trial_duration` is deliberately NOT set: the previous spectator screen auto-dismissed after
+    // four seconds, which is fine for a screen that says nothing and fatal for one carrying a
+    // completion code. This one waits for the participant.
+    const noMatchScreen = {
       timeline: [
         {
           type: jsPsychHtmlKeyboardResponse,
-          stimulus: "<p>This game is already full. Thanks for your interest!</p>",
+          stimulus: () => {
+            const waited =
+              noMatchReason === "spectator_overflow"
+                ? `<p>You arrived in time, but another pair had already formed, so there was no one
+                     left for us to match you with. That is our scheduling problem, not anything you
+                     did.</p>`
+                : `<p>We could not find you a partner in the time available. This happens when not
+                     enough people happen to be online at the same moment — it is nothing to do with
+                     you or your responses.</p>`;
+            return `<h2>We could not match you with a partner</h2>
+                ${waited}
+                <p><strong>You will still be paid ${money(
+                  CONFIG.NO_MATCH_PAYMENT_USD
+                )} for your time.</strong> Please submit below so we can process it.</p>
+                <p id="save-status" style="font-size:0.9em;color:#666">Saving…</p>
+                ${submissionBlockHTML("no_match")}`;
+          },
           choices: "NO_KEYS",
-          trial_duration: 4000,
-          on_finish: () => {
-            // Flush even here. A spectator has no game data, but their arrival and the fact they were
-            // turned away is the raw material for the odd-arrival rate #10's waiting room must handle.
-            recordOutcome("spectator");
-            if (CONFIG.FLUSH_ON_ABORT) Pipeline.flush("spectator");
+          on_load: () => {
+            // Button first, always. This screen exists so that someone who never got to play can
+            // still be paid; nothing may sit between them and that.
+            wireSubmissionButton("no_match");
+            recordOutcome(noMatchReason ?? "no_match");
             jsPsych.multiplayer.disconnect();
+            // Worth saving even with no game data: arrival time and the reason are the raw material
+            // for the arrival-rate and odd-arrival numbers that size #10's waiting room and set the
+            // lobby timeout (B6) for the real run.
+            Pipeline.flush(`no-match-${noMatchReason ?? "unknown"}`).then((r) => {
+              const el = document.getElementById("save-status");
+              if (!el) return;
+              el.textContent = r.skipped
+                ? ""
+                : r.ok
+                ? "Saved."
+                : r.timedOut
+                ? "Still uploading — you can submit now, this will finish in the background."
+                : "Upload failed. Please submit anyway and message the researcher.";
+            });
           },
         },
       ],
-      conditional_function: () => myRole === "spectator",
+      conditional_function: () => noMatch,
     };
 
     const gameRound = {
@@ -819,11 +971,13 @@
         preloadTrial,
         nameTrial,
         lobbyTrial,
-        roleTrial,
-        spectatorScreen,
+        pairingPhase,
         gameLoop,
-        // Exactly one of these two runs, and each carries its own completion code. gameLoop's own
-        // conditional cannot end it mid-game, so the abort comes from inside the round (#5).
+        // Exactly one of these three runs, and each carries its own completion code. Their
+        // conditions are mutually exclusive: noMatch excludes a role, a role excludes noMatch, and
+        // partnerDropped gates the complete screen. gameLoop's own conditional cannot end it
+        // mid-game, so the dropout abort comes from inside the round (#5).
+        noMatchScreen,
         partnerDroppedScreen,
         completeScreen,
       ]);
