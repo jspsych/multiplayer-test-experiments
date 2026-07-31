@@ -128,9 +128,25 @@
       // minutes of dead time before the survivor is released, against 15 minutes today, while still
       // requiring corroboration rather than firing on a single slow round.
       //
-      // The trade is asymmetric and worth stating. A false positive ends a live dyad early and pays
-      // both partners a partial code; a false negative leaves a survivor grinding. Requiring partner
-      // silence is what makes 2 safe — a slow dyad that is still talking is never aborted.
+      // The trade is asymmetric, and NOT in the direction it first looks. A false negative leaves a
+      // survivor grinding; a false positive ends a live game for BOTH participants and pays two
+      // partial codes — the same cost as the dropout this is guarding against, inflicted on a dyad
+      // that was working. Requiring partner silence is what makes 2 tolerable: a slow dyad that is
+      // still talking is never aborted.
+      //
+      // The known false-positive channel, stated plainly because the guard above does not close it:
+      // silence is not absence. A matcher can be actively working — clicking slots, placing 12
+      // tangrams — and typing nothing, and `save_interaction_history` is matcher-local until submit,
+      // so from the director's side that is byte-identical to a partner who has gone. Two slow first
+      // rounds on a full board is not far-fetched, and it is exactly where the effect is largest.
+      //
+      // Pilot check (#12): if `partner_dropped` rows cluster at `n_trials_completed` 0-1, that is
+      // this false positive, not a real dropout rate. The fix then is a POSITIVE-EVIDENCE signal —
+      // surfacing the matcher's slot activity into the shared session, which needs a channel the
+      // bundles do not currently expose (#11) — and NOT raising this number. A higher threshold buys
+      // safety with dead minutes and does not resolve the ambiguity: an active silent matcher looks
+      // absent at 3 rounds too, just later. That is the same trade the detector already refuses when
+      // it declines to count bare timeouts.
       DROPOUT_SILENT_ROUNDS: 2,
 
       // A4 — save per-round chunks rather than once at the end. A single end-of-run save loses
@@ -538,19 +554,30 @@
     // There is no presence API in any of the four bundles, so the partner's absence has to be
     // inferred. The inference has to be good, because acting on it ends a paid session.
     //
-    // `round_timeout` alone is NOT the signal. It is an unconditional wall-clock bound (see CONFIG),
-    // so it fires identically for a partner who left and a pair who are simply slow — and trial 1 of
-    // a 12-figure board is the longest in the study, so a genuine timeout there is entirely normal.
-    // Counting timeouts alone would abort real dyads at exactly the point the effect is largest.
+    // `round_timeout` alone is NOT the signal. It is a wall-clock bound (see CONFIG), so it fires
+    // identically for a partner who left and a pair who are simply slow — and trial 1 of a 12-figure
+    // board is the longest in the study, so a genuine timeout there is entirely normal. Counting
+    // timeouts alone would abort real dyads at exactly the point the effect is largest.
     //
     // So a round is "silent" only if it timed out AND the partner sent nothing during it. The plugin
     // records `message_count` (every message that round) and `messages_sent` (mine), and the chat
     // channel is per-round, so the difference is the partner's activity in that round alone. A
-    // partner who is talking is present, however slow they are; a partner who is neither acting nor
-    // talking for two consecutive rounds has almost certainly gone.
+    // partner who is talking is present, however slow they are.
+    //
+    // TWO CONFIG DEPENDENCIES, both currently satisfied by defaults and both silent if broken. There
+    // are tests for each in tests/dropout.test.mjs, because neither fails loudly at runtime:
+    //
+    //   1. `chat_persists` must stay OFF. The plugin keys the chat channel `<session>_chat_r<round>`
+    //      when it is off and `<session>_chat` when it is on, so turning it on makes `message_count`
+    //      CUMULATIVE: `partnerMessages` never returns to zero, the detector never fires again, and
+    //      the survivor grinds — the exact failure this exists to prevent, arrived at silently.
+    //   2. `ended_by: "timeout"` is only equivalent to "the round clock ran out" because
+    //      `selection_timeout` is unset. The plugin emits the same string for a selection timeout,
+    //      which is a different event with a possibly-present partner.
     //
     // Upgrade path: when a presence API exists (#11), this becomes a fallback rather than the
-    // primary signal. It does not need to wait for one.
+    // primary signal. It does not need to wait for one. See CONFIG for the false-positive channel
+    // this cannot close — an active but silent matcher — and what to do if the pilot shows it.
     // ===============================================================================================
     let consecutiveSilentRounds = 0;
     let partnerDropped = false;
@@ -576,7 +603,15 @@
     // Session-level facts, stamped onto every row at the point the game ends by any route. Recorded
     // here rather than left to analysis because "how did this session end" cannot be reconstructed
     // reliably from partial data — which is precisely the data most likely to be all we have.
+    //
+    // First writer wins. `addProperties` applies retroactively to every row already collected, so a
+    // second call would not merely add a row — it would rewrite the FIRST outcome on every existing
+    // row and destroy the reason the session actually ended. Exactly one outcome is recorded per
+    // session today; this makes that structural rather than a property of the current routing.
+    let endedReason = null;
     function recordOutcome(reason) {
+      if (endedReason) return;
+      endedReason = reason;
       jsPsych.data.addProperties({
         ended_reason: reason,
         n_trials_completed: completedTrials(),

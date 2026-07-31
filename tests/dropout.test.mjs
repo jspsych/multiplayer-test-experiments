@@ -149,6 +149,21 @@ const check = (name, cond, detail = "") => results.push([cond ? "PASS" : "FAIL",
   check("partner talking while I am silent is not a dropout", state.partnerDropped === false);
 }
 
+// --- config couplings the detector depends on ---------------------------------------------------
+// Neither of these fails loudly at runtime: the detector keeps running and quietly stops detecting.
+// They are asserted here because the coupling is invisible at the call site.
+{
+  // The plugin keys chat `<session>_chat_r<round>` only while `chat_persists` is off. Turn it on and
+  // `message_count` becomes cumulative, `partnerMessages` never returns to zero, and the detector
+  // never fires again — a survivor grinding through five dead rounds, with all 16 checks above still
+  // green, because they feed the detector per-round data it would no longer receive.
+  check("chat_persists is OFF, so message_count stays per-round", !/chat_persists:\s*true/.test(src));
+
+  // `ended_by: "timeout"` means "the round clock ran out" only while `selection_timeout` is unset —
+  // the plugin emits the same string for a selection timeout, which is a different event.
+  check("selection_timeout is unset, so ended_by:'timeout' has one meaning", !/selection_timeout:/.test(src));
+}
+
 for (const [s, n, d] of results) console.log(`${s}  ${n}${d ? `  (${d})` : ""}`);
 const passed = results.filter((x) => x[0] === "PASS").length;
 console.log(`\n${passed}/${results.length} passed`);
