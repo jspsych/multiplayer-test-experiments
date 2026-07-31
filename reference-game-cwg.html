@@ -658,13 +658,24 @@
       // A countdown, because an indefinite-feeling wait is what makes people abandon. The plugin
       // renders `message` once and does not update it, so the ticker is driven from here.
       on_load: () => {
+        // This deadline runs slightly AHEAD of the real one: the plugin calls on_load immediately
+        // after rendering `message`, but only arms its own timer at `wait()`, after `push_data` has
+        // round-tripped. On a slow connection the display therefore reaches zero first — and a
+        // countdown that hits 0:00 and then visibly does nothing is the exact indefinite-feeling
+        // wait this ticker exists to remove. So the last second says what is happening instead of
+        // showing a stopped clock.
         const deadline = Date.now() + CONFIG.LOBBY_TIMEOUT_MS;
         const el = document.getElementById("lobby-remaining");
         const tick = () => {
           const left = Math.max(0, deadline - Date.now());
+          if (!el) return;
+          if (left < 1000) {
+            el.textContent = "finishing up…";
+            return;
+          }
           const m = Math.floor(left / 60000);
           const s = Math.floor((left % 60000) / 1000);
-          if (el) el.textContent = `${m}:${String(s).padStart(2, "0")}`;
+          el.textContent = `${m}:${String(s).padStart(2, "0")}`;
         };
         tick();
         lobbyTicker = setInterval(tick, 1000);
@@ -696,22 +707,39 @@
         myRole = jsPsychMultiplayerRole.getMyRole();
         const byRole = jsPsychMultiplayerRole.participantsByRole();
         partnerId = myRole === "director" ? byRole.matcher?.[0] : byRole.director?.[0];
-        // The odd arrival. Previously a four-second "this game is already full" screen followed by
-        // disconnect and NO completion code — someone who showed up on time, was turned away for
-        // reasons entirely outside their control, and then could not submit or be paid. Routed to
-        // the same paid exit as a lobby timeout, because it is the same thing from the
-        // participant's point of view.
-        if (myRole === "spectator") {
+        // Anything that is not a playable role routes to the paid exit. Tested by exclusion rather
+        // than by listing the failures, because the cost of missing one is a participant who reaches
+        // the end of the timeline with no completion code and cannot submit.
+        //
+        // Two ways to get here:
+        //
+        //   spectator_overflow — the odd arrival. Previously a four-second "this game is already
+        //   full" screen followed by disconnect and NO completion code: someone who showed up on
+        //   time, was turned away for reasons entirely outside their control, and then could not be
+        //   paid. It is the same event as a lobby timeout from the participant's side.
+        //
+        //   pairing_timeout — the role plugin's OWN timeout, which defaults to 30s (not null, and
+        //   not unbounded; this file never sets it). On expiry it calls `finishTrial` with
+        //   `role: null`, having already cleared the assignment, so `getMyRole()` returns UNDEFINED
+        //   — the data row and the accessor disagree, which is why this checks for a playable role
+        //   rather than comparing against null. Reachable whenever `ready` stops being satisfiable
+        //   mid-pairing: a partner closes the lobby tab, or their own lobby timed out one tick
+        //   earlier and they have since disconnected. This route predates #5 and #6 and produced a
+        //   codeless exit then too; the difference now is that a paid exit exists to route it to.
+        //
+        // Kept separate in the data because the rates answer different questions — one is odd-
+        // numbered bursts, the other is ghost entries in the lobby (#10) — and are sized differently.
+        if (myRole !== "director" && myRole !== "matcher") {
           noMatch = true;
-          noMatchReason = "spectator_overflow";
+          noMatchReason = myRole === "spectator" ? "spectator_overflow" : "pairing_timeout";
         }
       },
     };
 
-    // roleTrial waits on its own `ready` predicate, so it must not run after a lobby timeout — that
-    // would swap an unbounded lobby for an unbounded pairing screen, which is the same bug one
-    // screen later. The sync plugin resolves rather than aborts on timeout, so this guard is what
-    // actually ends the session.
+    // The sync plugin RESOLVES rather than aborts on timeout, so without a guard the timeline walks
+    // straight into roleTrial after a lobby timeout. That does not hang — the role plugin's timeout
+    // defaults to 30s — but it makes someone already released wait another half minute on a pairing
+    // screen for a partner who was never going to arrive, and then finish with a null role. Skip it.
     const pairingPhase = {
       timeline: [roleTrial],
       conditional_function: () => !noMatch,

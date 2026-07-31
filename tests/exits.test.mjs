@@ -61,6 +61,7 @@ const sessions = [
   { label: "partner dropped (matcher)", state: { noMatch: false, partnerDropped: true, myRole: "matcher" }, expect: "partnerDroppedScreen" },
   { label: "lobby timed out, never got a role", state: { noMatch: true, partnerDropped: false, myRole: undefined }, expect: "noMatchScreen" },
   { label: "spectator overflow", state: { noMatch: true, partnerDropped: false, myRole: "spectator" }, expect: "noMatchScreen" },
+  { label: "pairing timed out (role plugin's own 30s bound)", state: { noMatch: true, partnerDropped: false, myRole: undefined }, expect: "noMatchScreen" },
 ];
 
 for (const { label, state, expect } of sessions) {
@@ -81,6 +82,53 @@ for (const { label, state, expect } of sessions) {
     "REGRESSION: a dropout survivor never reaches the complete screen",
     evaluate(conditionals.completeScreen, survivor) === false
   );
+}
+
+// --- the classifier that FEEDS the matrix above -------------------------------------------------
+//
+// The matrix takes `noMatch` as a given, so on its own it proves nothing about which sessions
+// actually arrive with it set. That gap is not hypothetical: it is exactly how a codeless exit
+// survived review of both #5 and #6.
+//
+// The role plugin's `timeout` defaults to 30s (`default: 3e4` — it is NOT null and NOT unbounded,
+// and this file never overrides it). On expiry it clears the assignment and finishes with
+// `role: null`, so `getMyRole()` returns UNDEFINED — data row and accessor disagree. That state is
+// neither a playable role nor "spectator", so it used to leave `noMatch` false, every screen's
+// conditional false, and the participant off the end of the timeline unable to submit.
+//
+// So: extract the real guard from roleTrial.on_finish and check that every non-playable role routes.
+const guardMatch = src.match(
+  /if \(myRole !== "director" && myRole !== "matcher"\) \{[\s\S]*?\n {8}\}/
+);
+if (!guardMatch) throw new Error("Could not find the no-match guard in roleTrial.on_finish");
+
+const classify = (myRole) => {
+  const state = { noMatch: false, noMatchReason: null };
+  new Function(
+    "myRole", "state",
+    `let noMatch = state.noMatch, noMatchReason = state.noMatchReason;
+     ${guardMatch[0]}
+     state.noMatch = noMatch; state.noMatchReason = noMatchReason;`
+  )(myRole, state);
+  return state;
+};
+
+check("director is not routed to the no-match exit", classify("director").noMatch === false);
+check("matcher is not routed to the no-match exit", classify("matcher").noMatch === false);
+check("spectator routes, as spectator_overflow", classify("spectator").noMatch === true && classify("spectator").noMatchReason === "spectator_overflow");
+
+// The regression. `getMyRole()` returns undefined after a role-plugin timeout; `null` is what the
+// data row carries. Both must route, so that nobody "fixes" this by comparing against one of them.
+for (const value of [undefined, null]) {
+  const s = classify(value);
+  check(
+    `REGRESSION: pairing timeout (myRole=${String(value)}) routes to a paid exit, not off the end`,
+    s.noMatch === true && s.noMatchReason === "pairing_timeout",
+    `${s.noMatch} / ${s.noMatchReason}`
+  );
+  // And end-to-end: the state the classifier produces must land on exactly one screen.
+  const fired = SCREENS.filter((n) => evaluate(conditionals[n], { ...s, partnerDropped: false, myRole: value }));
+  check(`pairing timeout (myRole=${String(value)}) lands on exactly one screen`, fired.length === 1 && fired[0] === "noMatchScreen", fired.join(", ") || "NONE");
 }
 
 // Pairing must be skipped after a lobby timeout, or roleTrial waits on its own predicate forever.
