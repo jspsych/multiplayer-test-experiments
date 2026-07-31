@@ -1,0 +1,4 @@
+# Locally built/downloaded bundles for reference-game-cwg-local.html. Deliberately NOT committed —
+# this repo has twice reverted vendoring prebuilt multiplayer bundles into git. Rebuild them with the
+# commands in that file's header comment.
+vendor/
