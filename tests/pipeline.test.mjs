@@ -12,8 +12,15 @@
 import fs from "fs";
 
 const html = fs.readFileSync(new URL("../reference-game-cwg.html", import.meta.url), "utf8");
-const src = html.match(/<script>([\s\S]*?)<\/script>\s*<\/html>/)[1];
-const pipelineSrc = src.match(/const Pipeline = \(\(\) => \{[\s\S]*?\n    \}\)\(\);/)[0];
+
+// Fail with a usable message rather than a destructuring throw. Both of these break silently if the
+// file gains a second <script> block or the module is renamed, and "cannot read [1] of null" is a
+// bad way to find that out.
+const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>\s*<\/html>/);
+if (!scriptMatch) throw new Error("Could not find the trailing <script> block in reference-game-cwg.html");
+const pipelineMatch = scriptMatch[1].match(/const Pipeline = \(\(\) => \{[\s\S]*?\n    \}\)\(\);/);
+if (!pipelineMatch) throw new Error("Could not find the Pipeline module in reference-game-cwg.html");
+const pipelineSrc = pipelineMatch[0];
 
 const CONFIG = {
   DATAPIPE_EXPERIMENT_ID: "abc123456789",
@@ -71,12 +78,12 @@ rows = [{ i: 0 }, { i: 1 }, { i: 2 }];
 let r = await P.save("round-1");
 check("201 counts as ok", r.ok === true);
 check("chunk 1 carries all 3 rows", sent[0].trials.length === 3);
-check("row_range correct", JSON.stringify(sent[0].row_range) === "[0,2]", JSON.stringify(sent[0].row_range));
+check("row_ranges correct", JSON.stringify(sent[0].row_ranges) === "[[0,2]]", JSON.stringify(sent[0].row_ranges));
 
 rows = [...rows, { i: 3 }, { i: 4 }];
 await P.save("round-2");
 check("chunk 2 is disjoint (only new rows)", sent[1].trials.length === 2, `got ${sent[1].trials.length}`);
-check("chunk 2 row_range continues", JSON.stringify(sent[1].row_range) === "[3,4]", JSON.stringify(sent[1].row_range));
+check("chunk 2 row_ranges continues", JSON.stringify(sent[1].row_ranges) === "[[3,4]]", JSON.stringify(sent[1].row_ranges));
 check("chunk_seq increments", sent[1].chunk_seq === 1);
 
 const before = sent.length;
@@ -102,7 +109,7 @@ check("terminal 400 not retried", sent.length === 1, `${sent.length} attempts`);
 responses = [{ status: 201 }];
 sent = [];
 r = await P.save("retry-after-terminal");
-check("rows returned to queue after failure", sent[0]?.trials.length === 1, JSON.stringify(sent[0]?.row_range));
+check("rows returned to queue after failure", sent[0]?.trials.length === 1, JSON.stringify(sent[0]?.row_ranges));
 
 responses = [{ status: 503 }, { status: 503 }, { status: 201 }];
 sent = [];
@@ -173,7 +180,7 @@ const reassembled = chunks.flatMap((c) => c.trials.map((t) => t.i));
 
 check("every row recovered despite the failure", JSON.stringify(reassembled) === "[0,1,2,3,4]", JSON.stringify(reassembled));
 check("no duplicated rows after requeue", new Set(reassembled).size === reassembled.length);
-check("row_ranges are contiguous (the real check)", chunks.every((c, k) => k === 0 || c.row_range[0] === chunks[k - 1].row_range[1] + 1), JSON.stringify(chunks.map((c) => c.row_range)));
+check("row_ranges cover 0..N exactly once", (() => { const seen = chunks.flatMap((c) => c.row_ranges.flatMap(([s2, e2]) => Array.from({ length: e2 - s2 + 1 }, (_, k) => s2 + k))); return JSON.stringify([...seen].sort((a, b) => a - b)) === "[0,1,2,3,4]" && new Set(seen).size === seen.length; })(), JSON.stringify(chunks.map((c) => c.row_ranges)));
 check("chunk_seq MAY gap — a failed save consumes one", JSON.stringify(chunks.map((c) => c.chunk_seq)) === "[0,1,3]", JSON.stringify(chunks.map((c) => c.chunk_seq)));
 check("abort chunk is labelled by exit path", chunks.at(-1).chunk_label === "abort-partner-dropped", chunks.at(-1).chunk_label);
 check("dyad_id is on every chunk for the join", chunks.every((c) => c.dyad_id === "dyadX"));
@@ -190,7 +197,7 @@ const P3 = makePipeline("dyadR", "pR");
 
 rows = [{ i: 0 }, { i: 1 }];
 responses = [{ throw: true }, { status: 400, error: "OSF_FILE_EXISTS" }];
-landed.push({ dyad_id: "dyadR", chunk_seq: 0, trials: [{ i: 0 }, { i: 1 }], row_range: [0, 1] });
+landed.push({ dyad_id: "dyadR", chunk_seq: 0, trials: [{ i: 0 }, { i: 1 }], row_ranges: [[0, 1]] });
 r = await P3.save("round-1");
 check("409 on our own retry counts as saved", r.ok === true, JSON.stringify(r));
 check("replay is flagged in the result", r.replayed === true);
@@ -209,21 +216,75 @@ check("409 on the FIRST attempt stays terminal", r.ok === false && sent.length =
 report(5);
 
 // ===================================================================================================
-console.log("\n--- filename keys ---");
+console.log("\n--- filename keys: no participant identifier in the filename ---");
+// OSF file listings are browsable without opening any file, so a PID in a filename publishes a
+// directory of participant identifiers — a broader exposure than the same value inside a row.
+// It belongs in the payload only (D3/D6 in DECISIONS.md, both open with IRB).
 // ===================================================================================================
 responses = [];
 sent = []; rows = [{ i: 0 }];
-await makePipeline("dyadK", "PROLIFIC123").save("round-1");
-check("filename prefers the Prolific PID", sent[0].filename.includes("PROLIFIC123"), sent[0].filename);
+await makePipeline("dyadK", "PROLIFIC123", "adapter-42").save("round-1");
+check("filename does NOT contain the Prolific PID", !sent[0].filename.includes("PROLIFIC123"), sent[0].filename);
+check("filename uses the adapter participant id", sent[0].filename.includes("adapter-42"), sent[0].filename);
+check("payload still carries the PID for reconciliation", sent[0].prolific_pid === "PROLIFIC123", String(sent[0].prolific_pid));
 
 sent = []; rows = [{ i: 0 }];
-await makePipeline("dyadK", null, "adapter-42").save("round-1");
-check("falls back to the adapter participant id locally", sent[0].filename.includes("adapter-42"), sent[0].filename);
+await makePipeline(null, "pN", null).save("round-1");
+check("no adapter id: filename never contains literal 'null'", !sent[0].filename.includes("null"), sent[0].filename);
+report(4);
 
-sent = []; rows = [{ i: 0 }];
-await makePipeline(null, "pN").save("round-1");
-check("null dyad id falls back to SEED, never literal 'null'", !sent[0].filename.includes("null"), sent[0].filename);
-report(3);
+// ===================================================================================================
+console.log("\n--- REGRESSION: saves that fail OUT OF ORDER must not strand rows ---");
+// A cursor wound back by a row count is only correct if the failing save is the most recent
+// claimant. When an earlier, slower save fails after a later one has already claimed rows, the
+// cursor lands short — dropping the earliest rows forever and re-sending the later ones. It fails
+// SILENTLY, because the overlapping ranges it produces are exactly what break the contiguity check
+// that would otherwise catch it. Not exotic: the per-round save is not awaited and can retry for
+// seconds, so a slow round-6 save overlapping the end-of-run flush is the ordinary end of a session.
+// ===================================================================================================
+{
+  const plan = { A: { delay: 60, status: 500 }, B: { delay: 0, status: 201 }, C: { delay: 0, status: 201 } };
+  const seen = [];
+  const slowFetch = async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    const rec = { ...body, ...JSON.parse(body.data) };
+    const q = plan[rec.chunk_label] ?? { delay: 0, status: 201 };
+    await new Promise((r) => setTimeout(r, q.delay));
+    if (q.status < 300) seen.push(rec);
+    return { status: q.status, headers: { get: () => null }, json: async () => ({ error: null }) };
+  };
+  const savedAttempts = CONFIG.SAVE_MAX_ATTEMPTS;
+  CONFIG.SAVE_MAX_ATTEMPTS = 1;
+
+  rows = [];
+  const PL = new Function(
+    "jsPsych", "CONFIG", "DATAPIPE_ENDPOINT", "DYAD_ID", "SEED", "PROLIFIC_PID",
+    "localAdapter", "fetch", "console",
+    pipelineSrc + " return Pipeline;"
+  )(jsPsych, CONFIG, DATAPIPE_ENDPOINT, "dOrder", "dOrder", "pO", { participantId: "aO" }, slowFetch, { warn() {}, error() {} });
+
+  rows = [{ i: 0 }, { i: 1 }, { i: 2 }];
+  const a = PL.save("A"); // claims 0-2, fails 60ms later
+  await new Promise((r) => setTimeout(r, 10));
+  rows = [...rows, { i: 3 }, { i: 4 }];
+  const b = PL.save("B"); // claims 3-4, succeeds immediately
+  await Promise.all([a, b]);
+  rows = [...rows, { i: 5 }];
+  await PL.save("C"); // must pick up A's stranded rows AND row 5
+
+  const got = seen.flatMap((c) => c.trials.map((t) => t.i));
+  const missing = [0, 1, 2, 3, 4, 5].filter((i) => !got.includes(i));
+  const dupes = [...new Set(got.filter((v, i) => got.indexOf(v) !== i))];
+  check("no rows lost when an earlier save fails late", missing.length === 0, `missing ${JSON.stringify(missing)}`);
+  check("no rows duplicated by the requeue", dupes.length === 0, `dupes ${JSON.stringify(dupes)}`);
+  check("every row landed exactly once", JSON.stringify([...got].sort((x, y) => x - y)) === "[0,1,2,3,4,5]", JSON.stringify(got));
+  // The invariant analysis is told to rely on.
+  const flat = seen.flatMap((c) => c.row_ranges.flatMap(([s2, e2]) => Array.from({ length: e2 - s2 + 1 }, (_, k) => s2 + k)));
+  check("row_ranges never overlap across chunks", new Set(flat).size === flat.length, JSON.stringify(seen.map((c) => c.row_ranges)));
+
+  CONFIG.SAVE_MAX_ATTEMPTS = savedAttempts;
+  report(4);
+}
 
 const passed = results.filter((x) => x[0] === "PASS").length;
 console.log(`\n${passed}/${results.length} passed`);

@@ -301,18 +301,37 @@
     const DATAPIPE_ENDPOINT = "https://pipe.jspsych.org/api/data/";
 
     const Pipeline = (() => {
-      // Index of the first row not yet included in a chunk. Chunks are disjoint and ordered, so
-      // reassembly is a concatenation and a duplicate chunk is detectable rather than silently merged.
+      // High-water mark: every row before this index has been CLAIMED by some save. It only ever
+      // advances. Rows from a save that failed are tracked separately, in `pending`, rather than by
+      // winding this back.
+      //
+      // Winding it back is the obvious implementation and it is WRONG, because saves do not fail in
+      // the order they were issued. Subtracting a count from a shared cursor is only correct if the
+      // failing save is the most recent claimant; when an earlier save fails after a later one has
+      // already claimed rows, the cursor lands short, permanently dropping the earliest rows while
+      // re-sending the later ones. That is not exotic — the per-round save is not awaited and can
+      // retry for seconds, so a slow round-6 save overlapping the end-of-run flush is the ordinary
+      // end of a session. It also fails SILENTLY, because the overlapping row ranges it produces are
+      // exactly what breaks the contiguity check that would otherwise catch it.
       let savedThrough = 0;
+      // Ranges [start, end] (inclusive) from saves that failed, awaiting a later attempt. The next
+      // save takes these along with any new rows, so nothing is stranded and nothing is duplicated.
+      let pending = [];
       let chunkSeq = 0;
       const log = [];
 
-      // DYAD_ID can be null before the adapter has written ?mp_session=; SEED carries a fallback for
-      // exactly that case, and a filename containing the literal "null" is worth avoiding.
+      // Defensive only: DYAD_ID now carries the same fallback SEED does, so this cannot currently be
+      // reached. Kept because a filename containing the literal "null" is unrecoverable in a way a
+      // redundant `??` is not — but it is NOT load-bearing, and the fix belongs at DYAD_ID.
       const dyadKey = () => DYAD_ID ?? SEED;
-      const participantKey = () => PROLIFIC_PID ?? localAdapter?.participantId ?? "local";
 
-      const configured = () => CONFIG.DATAPIPE_EXPERIMENT_ID.length > 0;
+      // Deliberately NOT the Prolific PID. OSF file listings are browsable without opening any file,
+      // so a PID in a filename publishes a directory of participant identifiers — a different and
+      // broader exposure than the same value sitting inside a saved row. Reconciliation still works,
+      // because the payload carries the PID. See D3/D6 in DECISIONS.md, both open with IRB.
+      const participantKey = () => localAdapter?.participantId ?? "anon";
+
+      const configured = () => !!CONFIG.DATAPIPE_EXPERIMENT_ID;
 
       // Fresh per SAVE, never per attempt and never derived from the round number. Two distinct saves
       // must not collide (OSF answers a duplicate with 409, the one unrecoverable failure); the
@@ -322,7 +341,10 @@
         `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
       function classify(status) {
-        if (status === 201 || status === 202) return "ok";
+        // Any 2xx is success. DataPipe currently answers 201 or 202, but treating an unexpected 200
+        // as a failure would requeue rows that did land and duplicate them — the failure mode this
+        // module works hardest to avoid, caused by nothing worse than an upstream tightening.
+        if (status >= 200 && status < 300) return "ok";
         if (status === 429 || status >= 500) return "retry";
         return "terminal";
       }
@@ -395,14 +417,20 @@
         }
 
         const all = jsPsych.data.get().values();
-        const rows = all.slice(savedThrough);
+
+        // Claim BEFORE any await, so a save triggered while this one is in flight (a round completing
+        // during the end-of-run flush) cannot send the same rows twice. Two things are claimed: every
+        // range left over from an earlier failure, and everything new since the high-water mark.
+        const inherited = pending;
+        pending = [];
+        const ranges = [...inherited];
+        if (all.length > savedThrough) ranges.push([savedThrough, all.length - 1]);
+        savedThrough = Math.max(savedThrough, all.length);
+
+        const rows = ranges.flatMap(([start, end]) => all.slice(start, end + 1));
         if (rows.length === 0) return { ok: true, empty: true };
 
         const seq = chunkSeq++;
-        // Claim the rows BEFORE awaiting, so a save triggered while this one is in flight (a round
-        // completing during an abort flush) cannot send the same rows twice.
-        savedThrough = all.length;
-
         const filename = `cwg_${dyadKey()}_${participantKey()}_${String(seq).padStart(
           2,
           "0"
@@ -413,19 +441,26 @@
           JSON.stringify({
             dyad_id: dyadKey(),
             participant_id: participantKey(),
+            // The Prolific id lives here, in the payload, and NOT in the filename — see
+            // participantKey(). Reconciliation reads it from here.
+            prolific_pid: PROLIFIC_PID,
             chunk_seq: seq,
             chunk_label: label,
-            row_range: [savedThrough - rows.length, savedThrough - 1],
+            // A LIST of inclusive ranges, not a single pair: a chunk may carry rows reclaimed from an
+            // earlier failed save alongside new ones, and those are not contiguous with each other.
+            row_ranges: ranges,
             saved_at: new Date().toISOString(),
             trials: rows,
           })
         );
 
         if (!result.ok && !result.skipped) {
-          // Put the rows back so a later flush retries them. The end-of-run flush then acts as a
-          // safety net for every earlier chunk that failed, at the cost of re-sending some rows under
-          // a new filename — duplicates are recoverable in analysis, missing rows are not.
-          savedThrough -= rows.length;
+          // Hand the ranges back for a later save to retry. Merged with anything another save queued
+          // while this one was in flight, and re-sorted so chunks stay readable in order. The
+          // end-of-run flush is then the safety net for every earlier failure, at the cost of
+          // re-sending some rows under a new filename — duplicates are recoverable in analysis,
+          // missing rows are not.
+          pending = [...ranges, ...pending].sort((a, b) => a[0] - b[0]);
         }
 
         log.push({ filename, label, rows: rows.length, ...result });
@@ -591,11 +626,17 @@
         Pipeline.flush("complete").then((r) => {
           const el = document.getElementById("save-status");
           if (!el) return;
+          // Do not promise a retry that may not happen. A 202 IS retried, by DataPipe, server-side.
+          // A flush that merely ran out of redirect budget may be a dead network, where nothing
+          // retries — so that case gets wording that is true either way rather than a reassurance
+          // that might be false.
           el.textContent = r.skipped
-            ? "" // no egress configured yet (#3) — say nothing rather than something false
+            ? "" // no egress configured yet (#15) — say nothing rather than something false
             : r.ok
             ? "Your responses have been saved."
-            : "Your responses are recorded; upload will be retried automatically.";
+            : r.timedOut
+            ? "Still uploading — you can submit now, this will finish in the background."
+            : "Your responses could not be uploaded. Please submit anyway and message the researcher.";
         });
 
         // Retained as a researcher fallback. Now that DataPipe is wired this is a debugging
