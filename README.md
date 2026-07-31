@@ -31,9 +31,12 @@ unrestricted two-way chat — faithful to both papers and load-bearing for the r
 effect both measure. Both were verified parameter-by-parameter against the papers **and** the
 original hawkrobe/tangrams experiment code, and play-tested two-tab at full schedule length.
 
-> **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) purely so
-> a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
-> it ends are logged as `ended_by: "timeout"` with a null assignment, so they're easy to exclude.
+> **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) so a
+> disconnected or absent partner cannot hang the trial forever — neither original was timed. Note what
+> it is, though: an **unconditional wall-clock bound armed when the round starts**, which ends every
+> round at that value whether or not anyone has dropped. It is not a dropout detector and cannot
+> distinguish a dead partner from a slow one. Rounds it ends are logged as `ended_by: "timeout"` with a
+> null assignment, so they're easy to exclude.
 
 ## Running it
 
