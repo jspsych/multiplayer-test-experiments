@@ -103,6 +103,18 @@
       // every participant who does not click the download button contributes nothing.
       DATAPIPE_EXPERIMENT_ID: "",
 
+      // --- Dropout detection (#5) ---------------------------------------------------------------
+      // Consecutive SILENT rounds before concluding the partner is gone. A round counts as silent
+      // only if it timed out AND the partner sent no chat message during it — see the detector for
+      // why both conditions are needed. Two is the suggested value: at a 180s round that is ~6
+      // minutes of dead time before the survivor is released, against 15 minutes today, while still
+      // requiring corroboration rather than firing on a single slow round.
+      //
+      // The trade is asymmetric and worth stating. A false positive ends a live dyad early and pays
+      // both partners a partial code; a false negative leaves a survivor grinding. Requiring partner
+      // silence is what makes 2 safe — a slow dyad that is still talking is never aborted.
+      DROPOUT_SILENT_ROUNDS: 2,
+
       // A4 — save per-round chunks rather than once at the end. A single end-of-run save loses
       // everything for any dyad that breaks, which is exactly the population #12 needs to
       // characterise. Assumes `limitSessions` is OFF (B4): DataPipe's counter increments per SAVE
@@ -502,6 +514,51 @@
     let myRole;
     let partnerId;
 
+    // ===============================================================================================
+    // DROPOUT DETECTION (#5)
+    //
+    // There is no presence API in any of the four bundles, so the partner's absence has to be
+    // inferred. The inference has to be good, because acting on it ends a paid session.
+    //
+    // `round_timeout` alone is NOT the signal. It is an unconditional wall-clock bound (see CONFIG),
+    // so it fires identically for a partner who left and a pair who are simply slow — and trial 1 of
+    // a 12-figure board is the longest in the study, so a genuine timeout there is entirely normal.
+    // Counting timeouts alone would abort real dyads at exactly the point the effect is largest.
+    //
+    // So a round is "silent" only if it timed out AND the partner sent nothing during it. The plugin
+    // records `message_count` (every message that round) and `messages_sent` (mine), and the chat
+    // channel is per-round, so the difference is the partner's activity in that round alone. A
+    // partner who is talking is present, however slow they are; a partner who is neither acting nor
+    // talking for two consecutive rounds has almost certainly gone.
+    //
+    // Upgrade path: when a presence API exists (#11), this becomes a fallback rather than the
+    // primary signal. It does not need to wait for one.
+    // ===============================================================================================
+    let consecutiveSilentRounds = 0;
+    let partnerDropped = false;
+    let dropoutRound = null;
+
+    // Trials the dyad actually completed, as opposed to rounds the timeline advanced through. Only
+    // `ended_by: "submit"` counts — a timed-out round has a null assignment and is not a trial.
+    // This is what makes a partial dyad usable rather than merely present (#8).
+    const completedTrials = () =>
+      jsPsych.data
+        .get()
+        .filter({ trial_type: "multiplayer-reference-game", ended_by: "submit" })
+        .count();
+
+    // Session-level facts, stamped onto every row at the point the game ends by any route. Recorded
+    // here rather than left to analysis because "how did this session end" cannot be reconstructed
+    // reliably from partial data — which is precisely the data most likely to be all we have.
+    function recordOutcome(reason) {
+      jsPsych.data.addProperties({
+        ended_reason: reason,
+        n_trials_completed: completedTrials(),
+        n_trials_scheduled: TRIALS,
+        dropout_detected_at_round: dropoutRound,
+      });
+    }
+
     const nameTrial = {
       type: jsPsychSurveyText,
       questions: [{ prompt: "Choose a display name:", required: true, name: "name" }],
@@ -546,6 +603,7 @@
           on_finish: () => {
             // Flush even here. A spectator has no game data, but their arrival and the fact they were
             // turned away is the raw material for the odd-arrival rate #10's waiting room must handle.
+            recordOutcome("spectator");
             if (CONFIG.FLUSH_ON_ABORT) Pipeline.flush("spectator");
             jsPsych.multiplayer.disconnect();
           },
@@ -583,6 +641,23 @@
       // Deliberately not awaited: the next round must not wait on OSF.
       on_finish: (data) => {
         if (CONFIG.SAVE_PER_ROUND) Pipeline.save(`round-${data.round ?? "?"}`);
+
+        // Partner activity in THIS round. `message_count` is every message on the round's channel
+        // and `messages_sent` is mine, so the difference is theirs. A round that timed out while the
+        // partner was still talking is a slow round, not a dropout.
+        const partnerMessages = (data.message_count ?? 0) - (data.messages_sent ?? 0);
+        const silent = data.ended_by === "timeout" && partnerMessages <= 0;
+        consecutiveSilentRounds = silent ? consecutiveSilentRounds + 1 : 0;
+
+        if (!partnerDropped && consecutiveSilentRounds >= CONFIG.DROPOUT_SILENT_ROUNDS) {
+          partnerDropped = true;
+          dropoutRound = data.round ?? null;
+          recordOutcome("partner_dropped");
+          // `conditional_function` on gameLoop is evaluated ONCE, before the first round, so it
+          // cannot end the loop mid-game. Aborting the enclosing timeline from here is what actually
+          // stops the remaining rounds; execution resumes at the screens after gameLoop.
+          jsPsych.abortCurrentTimeline();
+        }
       },
       prompt: (role) =>
         role === "director"
@@ -594,6 +669,46 @@
       timeline: [gameRound],
       timeline_variables: SCHEDULE,
       conditional_function: () => myRole === "director" || myRole === "matcher",
+    };
+
+    // The survivor's exit (#5). Honest about what happened, explicit that they are still paid, and
+    // it never blames them. This screen is the entire difference between a survivor who submits and
+    // one who abandons and opens a support ticket.
+    const partnerDroppedScreen = {
+      timeline: [
+        {
+          type: jsPsychHtmlKeyboardResponse,
+          stimulus: () => {
+            const played = completedTrials();
+            return `<h2>Your partner seems to have disconnected</h2>
+                <p>We waited, but your partner stopped responding, so we have ended the study here.
+                   <strong>This is not your fault, and your payment is not affected.</strong></p>
+                <p>You completed ${played} of ${TRIALS} round${played === 1 ? "" : "s"} together, and
+                   ${played > 0 ? "that work is saved and still useful to us" : "your time is still paid"}.</p>
+                <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
+                ${submissionBlockHTML("partner_dropped")}`;
+          },
+          choices: "NO_KEYS",
+          on_load: () => {
+            // Wire the button FIRST. The participant must be able to submit immediately, whatever
+            // the save is doing — the whole point of this screen is that they get paid.
+            wireSubmissionButton("partner_dropped");
+            jsPsych.multiplayer.disconnect();
+            Pipeline.flush("abort-partner-dropped").then((r) => {
+              const el = document.getElementById("save-status");
+              if (!el) return;
+              el.textContent = r.skipped
+                ? ""
+                : r.ok
+                ? "Your responses have been saved."
+                : r.timedOut
+                ? "Still uploading — you can submit now, this will finish in the background."
+                : "Your responses could not be uploaded. Please submit anyway and message the researcher.";
+            });
+          },
+        },
+      ],
+      conditional_function: () => partnerDropped,
     };
 
     const doneTrial = {
@@ -618,6 +733,7 @@
       choices: "NO_KEYS",
       on_load: () => {
         wireSubmissionButton("complete");
+        recordOutcome("complete");
 
         // Final flush: the last round's rows, plus anything an earlier chunk failed to send. Fired
         // on_load rather than on_finish because this trial takes no keys and never finishes — the
@@ -650,6 +766,17 @@
       },
     };
 
+    // `doneTrial` used to run unconditionally, which meant two people who never finished the game
+    // still reached "Game complete!" and were handed the `complete` code: the survivor of a dropout,
+    // and — already, before this change — any spectator, who saw a 4-second "game is full" screen and
+    // then a completion screen reporting 0 / 0. Both are paid under the wrong code, which defeats the
+    // point of having four, and the spectator case also contradicts what the screen before it said.
+    const completeScreen = {
+      timeline: [doneTrial],
+      conditional_function: () =>
+        !partnerDropped && (myRole === "director" || myRole === "matcher"),
+    };
+
     jsPsych.multiplayer.connect(localAdapter).then(() => {
       // Preload FIRST, before pairing: a participant who is still fetching images while their
       // partner waits in the lobby wastes the partner's time.
@@ -660,7 +787,10 @@
         roleTrial,
         spectatorScreen,
         gameLoop,
-        doneTrial,
+        // Exactly one of these two runs, and each carries its own completion code. gameLoop's own
+        // conditional cannot end it mid-game, so the abort comes from inside the round (#5).
+        partnerDroppedScreen,
+        completeScreen,
       ]);
     });
   </script>
