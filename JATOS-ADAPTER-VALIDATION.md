@@ -44,10 +44,22 @@ The C&WG integration must:
 
 ## Explicit dependency and merge gate
 
-The C&WG branch depends on the exact `jspsych-multiplayer` PR #88 branch commit used to build the
-JATOS adapter browser artifact. Record that full SHA and artifact provenance in the integration
-commit that first loads the adapter. Do not replace this with an unpinned branch URL, and do not
-claim launch readiness while the dependency is unpublished.
+The C&WG branch is pinned to `jspsych/jspsych-multiplayer` PR #88 commit
+[`466fe5f486e2cbff4259b41e14d2fd7f63c5ea9a`](https://github.com/jspsych/jspsych-multiplayer/commit/466fe5f486e2cbff4259b41e14d2fd7f63c5ea9a).
+The adapter's IIFE build exposes `jsPsychAdapterMultiplayerJatos` and its source defines the
+`groupId`, `getPresence()`, `subscribePresence()`, and `sealGroup()` APIs used by this plan.
+
+PR #88 does not commit its generated `dist/` files. When the study first loads this adapter, rebuild
+`packages/adapter-multiplayer-jatos/dist/index.browser.min.js` from that exact commit and vendor the
+result with provenance, rather than linking an unpinned branch URL or hand-editing a bundle.
+
+The published npm package `@jspsych-multiplayer/adapter-multiplayer-jatos@0.1.0` is **not** an
+interchangeable substitute. Its source commit is
+`6e13f54805a2832e9a0969cf4898cd48ac6658d3`; inspection of its browser bundle found the base
+adapter contract only, without the PR #88 presence and group-sealing APIs. Do not use it for this
+integration.
+
+Do not claim launch readiness while the PR #88 dependency is unpublished.
 
 Before merging or piloting the C&WG integration, run the full study against that pinned artifact in
 a deployed JATOS group study and demonstrate:
