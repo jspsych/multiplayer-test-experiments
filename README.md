@@ -48,9 +48,15 @@ These currently run on `adapter-multiplayer-local` (no backend needed) for two-t
    into a second tab so a second player joins.
 4. The first tab becomes the director, the second the matcher.
 
-For a paid Prolific run, swap `adapter-multiplayer-local` for
-[`adapter-multiplayer-firebase`](https://github.com/jspsych/jspsych-multiplayer/tree/main/packages/adapter-multiplayer-firebase)
-(one script-tag swap, see the header comment in each file) plus a real waiting room for pairing.
+The local adapter is only for two-tab piloting. The proposed paid-run path for C&WG is now JATOS
+group studies, using the JATOS adapter work in
+[`jspsych-multiplayer` PR #88](https://github.com/jspsych/jspsych-multiplayer/pull/88). It is not a
+script-tag swap: the study must derive its shared schedule seed and dyad ID from the JATOS group,
+admit two live members, seal that group before role assignment, and retain bounded no-match and
+dropout exits. The adapter dependency remains unpublished and must be pinned to an exact upstream
+commit until it is merged and released. See
+[`JATOS-ADAPTER-VALIDATION.md`](JATOS-ADAPTER-VALIDATION.md) for the live adapter evidence,
+observed leave-event ordering, and the C&WG integration gates.
 
 **Note on package versions:** the `@jspsych-multiplayer/*` package script tags below are pinned to
 `0.1.0` on jsDelivr, but those packages are not yet published to npm — publishing is gated on
