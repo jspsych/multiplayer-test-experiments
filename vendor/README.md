@@ -21,13 +21,22 @@ the multiplayer API to the `jsPsych.multiplayer` namespace. The published `0.1.0
 bundles predate that migration and still call the old core API, so mixing them
 with the pinned core does not work.
 
-Vendoring all four keeps the plugin bundles and the pinned core consistent.
+Vendoring the four original bundles keeps the plugin bundles and the pinned core consistent.
+
+`adapter-multiplayer-jatos.js` is a separate, C&WG-only integration dependency. It was rebuilt
+from `jspsych/jspsych-multiplayer` PR #88 commit
+[`466fe5f486e2cbff4259b41e14d2fd7f63c5ea9a`](https://github.com/jspsych/jspsych-multiplayer/commit/466fe5f486e2cbff4259b41e14d2fd7f63c5ea9a),
+using that package's `npm ci --include=dev` and
+`npm run build --workspace=@jspsych-multiplayer/adapter-multiplayer-jatos`. The vendored file is
+`packages/adapter-multiplayer-jatos/dist/index.browser.min.js` (SHA-256
+`aed46860875bc91020fd244501429568cce80f275af86980c6bc6833bd0648ba`). It deliberately does not
+use the published `0.1.0` npm bundle, which predates PR #88's presence and group-sealing APIs.
 
 ## Provenance
 
 Built with `npm run build` from `jspsych/jspsych-multiplayer` at commit
 [`69c0d7b`](https://github.com/jspsych/jspsych-multiplayer/commit/69c0d7b).
-Each file is that package's `dist/index.browser.min.js`, renamed.
+Each original file is that package's `dist/index.browser.min.js`, renamed.
 
 The experiment files load these over jsDelivr, SHA-pinned to the commit that added
 them (`5046bf0`). If you rebuild and recommit the bundles, you must also bump that
