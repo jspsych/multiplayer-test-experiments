@@ -18,7 +18,8 @@
          published 0.1.0 builds predate the jsPsych.multiplayer namespace migration. Repoint to
          cdn.jsdelivr.net/npm/... and delete vendor/ once jspsych-multiplayer PR #35 publishes.
          See vendor/README.md. -->
-    <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@5046bf0c1672823456d78e971603260f76a3a225/vendor/adapter-multiplayer-local.js"></script>
+    <script src="jatos.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@3e635e1e8efe72f6ac3e353174c9a36b5460f0b0/vendor/adapter-multiplayer-jatos.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@5046bf0c1672823456d78e971603260f76a3a225/vendor/plugin-multiplayer-sync.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@5046bf0c1672823456d78e971603260f76a3a225/vendor/plugin-multiplayer-role.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/jspsych/multiplayer-test-experiments@5046bf0c1672823456d78e971603260f76a3a225/vendor/plugin-multiplayer-reference-game.js"></script>
@@ -110,6 +111,7 @@
       // this is locked at publish. ~5 min is a starting point, to be refined from observed arrival
       // rate in the pilot (#12) BEFORE the study is published.
       LOBBY_TIMEOUT_MS: 300000,
+      JATOS_CONNECT_TIMEOUT_MS: 20000,
 
       // B2 — what an unmatched participant is paid. Full task rate for the wait, NOT Prolific's
       // $0.14/min floor: a floor-rate payment loses to returning the study and taking a short
@@ -176,7 +178,9 @@
     };
 
     const jsPsych = initJsPsych();
-    const localAdapter = new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
+    const jatosAdapter = new jsPsychAdapterMultiplayerJatos({
+      connectTimeoutMs: CONFIG.JATOS_CONNECT_TIMEOUT_MS,
+    });
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams
     // Seed the schedule from the SHARED SESSION ID, so each dyad gets its own target orders while the
@@ -188,10 +192,11 @@
     // second tab arrives with it already in the pasted link, so both compute the same schedule.
     // Swapping to the Firebase adapter: seed from whatever identifies the dyad there (e.g. the room
     // id) — the requirement is only that both partners derive the same value.
-    const SEED = new URLSearchParams(location.search).get("mp_session") ?? "cwg-fullboard";
+    let SEED = null;
     // 6 trials, each a fresh random order of all 12. Deterministic given the seed, so both tabs agree
     // without exchanging anything.
-    const SCHEDULE = Tangrams.fullBoardSchedule(TRIALS, SEED);
+    let SCHEDULE = [];
+    let admittedMemberIds = [];
 
     // ===============================================================================================
     // PROLIFIC IDENTIFIERS AND PROVENANCE (#4)
@@ -216,7 +221,7 @@
     // whose rows claim not to belong to one — self-inconsistent data that still LOOKS reconcilable,
     // which is worse than either failure alone. The fallback makes it consistent; the warning below
     // makes it loud, because a constant dyad id shared across all dyads is still wrong.
-    const DYAD_ID = prolificParams.get("mp_session") ?? "cwg-fullboard";
+    let DYAD_ID = null;
 
     // Attach to EVERY row. Analysis here is entirely dyad-level, so a row that cannot be traced to a
     // pair is not analysable; and a row that cannot be traced to a PROLIFIC_PID cannot be paid for.
@@ -226,7 +231,7 @@
       session_id: SESSION_ID,
       dyad_id: DYAD_ID,
       // Own participant id, so the two sides of a dyad are distinguishable within it.
-      participant_id: localAdapter.participantId ?? null,
+      participant_id: jatosAdapter.participantId ?? null,
       // Run provenance — needed to interpret data collected while piloting at different values.
       experiment_file: "reference-game-cwg.html",
       config_trials: TRIALS,
@@ -375,7 +380,7 @@
       // so a PID in a filename publishes a directory of participant identifiers — a different and
       // broader exposure than the same value sitting inside a saved row. Reconciliation still works,
       // because the payload carries the PID. See D3/D6 in DECISIONS.md, both open with IRB.
-      const participantKey = () => localAdapter?.participantId ?? "anon";
+      const participantKey = () => jatosAdapter?.participantId ?? "anon";
 
       const configured = () => !!CONFIG.DATAPIPE_EXPERIMENT_ID;
 
@@ -637,8 +642,9 @@
     let lobbyTicker = null;
 
     const lobbyTrial = {
-      type: jsPsychMultiplayerSync,
-      push_data: () => ({ name: myName, joinedAt: Date.now() }),
+      // Presence, not retained group-session records, admits a dyad. In particular, member-leave
+      // is authoritative even while the leaver still appears in open channels.
+      type: jsPsychHtmlKeyboardResponse,
       // An unbounded wait is the whole bug: the plugin's `timeout` default is null, so `wait()` was
       // called with no bound and an unmatched participant sat here forever — no timeout, no exit, no
       // completion code, no way to be paid for time they had already given up.
@@ -653,11 +659,13 @@
                    )}</strong> for waiting. You do not need to do anything.</p>
                 <p style="font-size:0.85em;color:#888">Testing locally? Open this page in another tab,
                    keeping the <code>?mp_session=</code> in the URL.</p>`,
-      wait_for: (group) =>
-        Object.values(group).filter((entry) => entry && entry.name).length >= MIN_PLAYERS,
-      // A countdown, because an indefinite-feeling wait is what makes people abandon. The plugin
-      // renders `message` once and does not update it, so the ticker is driven from here.
+      choices: "NO_KEYS",
       on_load: () => {
+        const root = document.querySelector(".jspsych-html-keyboard-response-stimulus");
+        if (root) root.innerHTML = `<p>Waiting for a partner to join…</p>
+          <p>This study is played in pairs, so we need to match you with someone before we can start.</p>
+          <p><strong>Time remaining: <span id="lobby-remaining">—</span></strong></p>
+          <p>If we cannot find you a partner in time, we will still pay you ${money(CONFIG.NO_MATCH_PAYMENT_USD)}.</p>`;
         // This deadline runs slightly AHEAD of the real one: the plugin calls on_load immediately
         // after rendering `message`, but only arms its own timer at `wait()`, after `push_data` has
         // round-tripped. On a slow connection the display therefore reaches zero first — and a
@@ -679,34 +687,47 @@
         };
         tick();
         lobbyTicker = setInterval(tick, 1000);
-      },
-      on_finish: (data) => {
-        clearInterval(lobbyTicker);
-        lobbyTicker = null;
-        if (data.timed_out) {
-          // The sync trial RESOLVES on timeout rather than aborting, so without this flag the
-          // timeline walks straight into roleTrial and waits on its own predicate — swapping an
-          // unbounded lobby for an unbounded pairing screen.
-          noMatch = true;
-          noMatchReason = "lobby_timeout";
-        }
+        let settled = false;
+        let unsubscribe = () => {};
+        const finish = (reason, ids = []) => {
+          if (settled) return;
+          settled = true;
+          clearInterval(lobbyTicker); lobbyTicker = null; unsubscribe();
+          if (reason !== "matched") { noMatch = true; noMatchReason = reason; jsPsych.finishTrial({ lobby_outcome: reason }); return; }
+          admittedMemberIds = ids;
+          jatosAdapter.sealGroup().then(() => {
+            const p = jatosAdapter.getPresence();
+            const stillLive = ids.length === MIN_PLAYERS && ids.every((id) =>
+              p.assignedMemberIds.includes(id) && p.openChannelMemberIds.includes(id));
+            if (!stillLive) { noMatch = true; noMatchReason = "partner_left_before_seal"; }
+            jsPsych.finishTrial({ lobby_outcome: noMatch ? noMatchReason : "matched", admitted_member_ids: ids });
+          }).catch(() => { noMatch = true; noMatchReason = "seal_failed"; jsPsych.finishTrial({ lobby_outcome: noMatchReason }); });
+        };
+        const timer = setTimeout(() => finish("lobby_timeout"), CONFIG.LOBBY_TIMEOUT_MS);
+        const observe = ({ snapshot }) => {
+          const ids = snapshot.assignedMemberIds;
+          const live = ids.length === MIN_PLAYERS && ids.every((id) => snapshot.openChannelMemberIds.includes(id));
+          if (live) { clearTimeout(timer); finish("matched", [...ids].sort()); }
+        };
+        unsubscribe = jatosAdapter.subscribePresence(observe);
+        if (settled) unsubscribe();
       },
     };
 
     const roleTrial = {
-      type: jsPsychMultiplayerRole,
-      roles: ["director", "matcher"],
-      strategy: "random",
-      overflow_role: "spectator",
-      ready: (group) =>
-        Object.keys(group).length >= MIN_PLAYERS &&
-        Object.values(group).every((entry) => entry && entry.joinedAt != null),
-      save_group: true,
-      message: "<p>Pairing you with your partner…</p>",
-      on_finish: () => {
-        myRole = jsPsychMultiplayerRole.getMyRole();
-        const byRole = jsPsychMultiplayerRole.participantsByRole();
-        partnerId = myRole === "director" ? byRole.matcher?.[0] : byRole.director?.[0];
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: "<p>Pairing you with your partner…</p>", choices: "NO_KEYS",
+      on_load: async () => {
+        try {
+          await jatosAdapter.push({ name: myName, joinedAt: Date.now(), cwg_dyad_id: DYAD_ID });
+          const p = jatosAdapter.getPresence();
+          const live = admittedMemberIds.length === MIN_PLAYERS && admittedMemberIds.every((id) => p.assignedMemberIds.includes(id) && p.openChannelMemberIds.includes(id));
+          if (live && admittedMemberIds.includes(jatosAdapter.participantId)) {
+            const director = admittedMemberIds[Math.abs([...DYAD_ID].reduce((n, c) => ((n * 31) + c.charCodeAt(0)) | 0, 0)) % MIN_PLAYERS];
+            myRole = jatosAdapter.participantId === director ? "director" : "matcher";
+            partnerId = admittedMemberIds.find((id) => id !== jatosAdapter.participantId);
+          }
+        } finally {
         // Anything that is not a playable role routes to the paid exit. Tested by exclusion rather
         // than by listing the failures, because the cost of missing one is a participant who reaches
         // the end of the timeline with no completion code and cannot submit.
@@ -731,7 +752,9 @@
         // numbered bursts, the other is ghost entries in the lobby (#10) — and are sized differently.
         if (myRole !== "director" && myRole !== "matcher") {
           noMatch = true;
-          noMatchReason = myRole === "spectator" ? "spectator_overflow" : "pairing_timeout";
+          noMatchReason = "partner_left_before_task";
+        }
+        jsPsych.finishTrial({ role: myRole ?? null, partner_id: partnerId ?? null });
         }
       },
     };
@@ -803,7 +826,7 @@
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
       columns: 6, // 2 rows of 6, as in the original
-      role: () => jsPsychMultiplayerRole.getMyRole(),
+      role: () => myRole,
       partner_id: () => partnerId,
       round: jsPsych.timelineVariable("round"),
       targets: jsPsych.timelineVariable("targets"), // all 12 ids, ordered → full-board match
@@ -964,7 +987,17 @@
         !partnerDropped && (myRole === "director" || myRole === "matcher"),
     };
 
-    jsPsych.multiplayer.connect(localAdapter).then(() => {
+    jatos.onLoad(async () => {
+      try {
+        await jsPsych.multiplayer.connect(jatosAdapter);
+        DYAD_ID = jatosAdapter.groupId;
+        if (!DYAD_ID) throw new Error("JATOS connected without a group ID");
+        SEED = DYAD_ID;
+        SCHEDULE = Tangrams.fullBoardSchedule(TRIALS, SEED);
+        gameLoop.timeline_variables = SCHEDULE;
+        // This second stamp happens before the first trial; it replaces the construction-time null
+        // placeholders with the shared JATOS identity on every subsequently collected row.
+        jsPsych.data.addProperties({ dyad_id: DYAD_ID, participant_id: jatosAdapter.participantId, jatos_group_id: DYAD_ID });
       // Preload FIRST, before pairing: a participant who is still fetching images while their
       // partner waits in the lobby wastes the partner's time.
       jsPsych.run([
@@ -981,6 +1014,15 @@
         partnerDroppedScreen,
         completeScreen,
       ]);
+      } catch (error) {
+        console.error("[jatos] could not initialize group study", error);
+        DYAD_ID = `unassigned-${jatosAdapter.participantId ?? "anon"}`;
+        SEED = DYAD_ID;
+        jsPsych.data.addProperties({ dyad_id: DYAD_ID, participant_id: jatosAdapter.participantId ?? null });
+        noMatch = true;
+        noMatchReason = "adapter_connect_error";
+        jsPsych.run([noMatchScreen]);
+      }
     });
   </script>
 </html>

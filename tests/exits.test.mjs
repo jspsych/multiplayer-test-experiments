@@ -115,15 +115,15 @@ const classify = (myRole) => {
 
 check("director is not routed to the no-match exit", classify("director").noMatch === false);
 check("matcher is not routed to the no-match exit", classify("matcher").noMatch === false);
-check("spectator routes, as spectator_overflow", classify("spectator").noMatch === true && classify("spectator").noMatchReason === "spectator_overflow");
+check("a non-player role routes to the paid no-match exit", classify("spectator").noMatch === true && classify("spectator").noMatchReason === "partner_left_before_task");
 
 // The regression. `getMyRole()` returns undefined after a role-plugin timeout; `null` is what the
 // data row carries. Both must route, so that nobody "fixes" this by comparing against one of them.
 for (const value of [undefined, null]) {
   const s = classify(value);
   check(
-    `REGRESSION: pairing timeout (myRole=${String(value)}) routes to a paid exit, not off the end`,
-    s.noMatch === true && s.noMatchReason === "pairing_timeout",
+    `REGRESSION: failed task admission (myRole=${String(value)}) routes to a paid exit, not off the end`,
+    s.noMatch === true && s.noMatchReason === "partner_left_before_task",
     `${s.noMatch} / ${s.noMatchReason}`
   );
   // And end-to-end: the state the classifier produces must land on exactly one screen.

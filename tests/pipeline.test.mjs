@@ -55,7 +55,7 @@ const fetch = async (url, opts) => {
 function makePipeline(dyadId, prolificPid, participantId = "adapter-id") {
   return new Function(
     "jsPsych", "CONFIG", "DATAPIPE_ENDPOINT", "DYAD_ID", "SEED", "PROLIFIC_PID",
-    "localAdapter", "fetch", "console",
+    "jatosAdapter", "fetch", "console",
     pipelineSrc + " return Pipeline;"
   )(
     jsPsych, CONFIG, DATAPIPE_ENDPOINT, dyadId, dyadId ?? "seed-fallback", prolificPid,
@@ -259,7 +259,7 @@ console.log("\n--- REGRESSION: saves that fail OUT OF ORDER must not strand rows
   rows = [];
   const PL = new Function(
     "jsPsych", "CONFIG", "DATAPIPE_ENDPOINT", "DYAD_ID", "SEED", "PROLIFIC_PID",
-    "localAdapter", "fetch", "console",
+    "jatosAdapter", "fetch", "console",
     pipelineSrc + " return Pipeline;"
   )(jsPsych, CONFIG, DATAPIPE_ENDPOINT, "dOrder", "dOrder", "pO", { participantId: "aO" }, slowFetch, { warn() {}, error() {} });
 
