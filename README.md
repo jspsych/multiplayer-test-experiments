@@ -64,3 +64,10 @@ observed leave-event ordering, and the C&WG integration gates.
 Packages") merging. Until then, either build the packages from a local checkout of
 jspsych-multiplayer and swap in relative `dist/` paths, or wait for the publish and confirm the
 pinned version still matches.
+
+## JATOS smoke-test package
+
+Run `node scripts/build-jatos-cwg.mjs` to create `dist/reference-game-cwg-jatos.jzip` for import
+into JATOS. It packages the C&WG page, tangram assets, and pinned JATOS adapter, and configures a
+two-active-member group batch with no historical-member cap. It is a deployment smoke test, not a
+paid-study package.
