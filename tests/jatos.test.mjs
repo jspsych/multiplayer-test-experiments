@@ -16,6 +16,9 @@ check("polls current presence to close a missed-event window", /setInterval\(\(\
 check("does not gate admission on open-channel count", !/const live = ids\.length === MIN_PLAYERS && ids\.every\(\(id\) => snapshot\.openChannelMemberIds/.test(html));
 check("requires matching records from both candidate ids", /ids\.every\(\(id\) => \{[\s\S]*cwg_lobby_admission/.test(html));
 check("publishes readiness before sealing", /jatosAdapter\.push\(\{ cwg_lobby_admission: admissionRecord \}\)[\s\S]*?\.then\(waitForBoth\)[\s\S]*?\.then\(\(\) => jatosAdapter\.sealGroup\(\)\)/.test(html));
+check("keeps the lobby deadline while awaiting the second readiness record", /const timer = setTimeout\(\(\) => finishNoMatch\("lobby_timeout"\), CONFIG\.LOBBY_TIMEOUT_MS\);[\s\S]*?if \(assignedPair\) beginAdmission\(\[\.\.\.ids\]\.sort\(\)\);/.test(html));
+const admissionSource = html.slice(html.indexOf("const beginAdmission"), html.indexOf("const timer = setTimeout"));
+check("does not use the short task-connect timeout for lobby readiness", !admissionSource.includes("CONFIG.JATOS_CONNECT_TIMEOUT_MS"));
 check("preserves admission record in role write", /cwg_lobby_admission: admissionRecord/.test(html));
 
 for (const [status, name] of results) console.log(`${status}  ${name}`);

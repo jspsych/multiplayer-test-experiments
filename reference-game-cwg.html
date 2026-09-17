@@ -693,15 +693,26 @@
         tick();
         lobbyTicker = setInterval(tick, 1000);
         let settled = false;
+        let admissionStarted = false;
         let unsubscribe = () => {};
+        let unsubscribeAdmission = () => {};
         let presencePoll = null;
-        const finish = (reason, ids = []) => {
-          if (settled) return;
-          settled = true;
+        const stopLobby = () => {
+          clearTimeout(timer);
           clearInterval(lobbyTicker); lobbyTicker = null;
           if (presencePoll !== null) clearInterval(presencePoll);
-          unsubscribe();
-          if (reason !== "matched") { noMatch = true; noMatchReason = reason; jsPsych.finishTrial({ lobby_outcome: reason }); return; }
+          unsubscribe(); unsubscribeAdmission();
+        };
+        const finishNoMatch = (reason) => {
+          if (settled) return;
+          settled = true;
+          stopLobby();
+          noMatch = true; noMatchReason = reason;
+          jsPsych.finishTrial({ lobby_outcome: reason });
+        };
+        const beginAdmission = (ids) => {
+          if (settled || admissionStarted) return;
+          admissionStarted = true;
           admittedMemberIds = ids;
           const memberKey = ids.join("|");
           admissionRecord = { group_id: DYAD_ID, member_key: memberKey, ready_at: Date.now() };
@@ -712,38 +723,41 @@
               return record?.group_id === DYAD_ID && record?.member_key === memberKey;
             });
           };
-          const waitForBoth = () => new Promise((resolve, reject) => {
+          const waitForBoth = () => new Promise((resolve) => {
             if (bothReady()) return resolve();
-            const timeout = setTimeout(() => { stop(); reject(new Error("admission handshake timed out")); }, CONFIG.JATOS_CONNECT_TIMEOUT_MS);
-            const stop = jatosAdapter.subscribe(() => { if (bothReady()) { clearTimeout(timeout); stop(); resolve(); } });
+            unsubscribeAdmission = jatosAdapter.subscribe(() => {
+              if (bothReady()) { unsubscribeAdmission(); unsubscribeAdmission = () => {}; resolve(); }
+            });
           });
           jatosAdapter.push({ cwg_lobby_admission: admissionRecord })
             .then(waitForBoth)
             .then(() => jatosAdapter.sealGroup())
             .then(() => {
+              if (settled) return;
               const p = jatosAdapter.getPresence();
               // Membership/leave is authoritative here. The completed two-sided write handshake
               // already proves both channels were usable; groupChannels can lag membership during
               // JATOS lifecycle transitions and must not undo a valid admission.
               const stillAssigned = ids.every((id) => p.assignedMemberIds.includes(id));
               if (!stillAssigned) { noMatch = true; noMatchReason = "partner_left_before_seal"; }
+              settled = true;
+              stopLobby();
               jsPsych.finishTrial({ lobby_outcome: noMatch ? noMatchReason : "matched", admitted_member_ids: ids });
             })
             .catch((error) => {
+              if (settled) return;
               console.error("[jatos] lobby admission failed", error);
-              noMatch = true;
-              noMatchReason = "admission_handshake_failed";
-              jsPsych.finishTrial({ lobby_outcome: noMatchReason });
+              finishNoMatch("admission_handshake_failed");
             });
         };
-        const timer = setTimeout(() => finish("lobby_timeout"), CONFIG.LOBBY_TIMEOUT_MS);
+        const timer = setTimeout(() => finishNoMatch("lobby_timeout"), CONFIG.LOBBY_TIMEOUT_MS);
         const observe = ({ snapshot }) => {
           const ids = snapshot.assignedMemberIds;
           // Do not gate on openChannelMemberIds. A leave event / assigned membership is the
           // authoritative transition; the handshake below proves that both current members can
           // actually exchange group-session writes.
           const assignedPair = ids.length === MIN_PLAYERS;
-          if (assignedPair) { clearTimeout(timer); finish("matched", [...ids].sort()); }
+          if (assignedPair) beginAdmission([...ids].sort());
         };
         unsubscribe = jatosAdapter.subscribePresence(observe);
         // JATOS normally emits member callbacks, but a client can subscribe between its initial
