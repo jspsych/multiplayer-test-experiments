@@ -60,7 +60,7 @@ const sessions = [
   { label: "partner dropped mid-game", state: { noMatch: false, partnerDropped: true, myRole: "director" }, expect: "partnerDroppedScreen" },
   { label: "partner dropped (matcher)", state: { noMatch: false, partnerDropped: true, myRole: "matcher" }, expect: "partnerDroppedScreen" },
   { label: "lobby timed out, never got a role", state: { noMatch: true, partnerDropped: false, myRole: undefined }, expect: "noMatchScreen" },
-  { label: "spectator overflow", state: { noMatch: true, partnerDropped: false, myRole: "spectator" }, expect: "noMatchScreen" },
+  { label: "unexpected non-player role", state: { noMatch: true, partnerDropped: false, myRole: "spectator" }, expect: "noMatchScreen" },
   { label: "pairing timed out (role plugin's own 30s bound)", state: { noMatch: true, partnerDropped: false, myRole: undefined }, expect: "noMatchScreen" },
 ];
 
@@ -115,7 +115,10 @@ const classify = (myRole) => {
 
 check("director is not routed to the no-match exit", classify("director").noMatch === false);
 check("matcher is not routed to the no-match exit", classify("matcher").noMatch === false);
-check("spectator routes, as spectator_overflow", classify("spectator").noMatch === true && classify("spectator").noMatchReason === "spectator_overflow");
+check(
+  "unexpected non-player role routes as pairing_timeout",
+  classify("spectator").noMatch === true && classify("spectator").noMatchReason === "pairing_timeout"
+);
 
 // The regression. `getMyRole()` returns undefined after a role-plugin timeout; `null` is what the
 // data row carries. Both must route, so that nobody "fixes" this by comparing against one of them.

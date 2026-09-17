@@ -580,10 +580,13 @@
           type: jsPsychHtmlKeyboardResponse,
           stimulus: () => {
             const waited =
-              noMatchReason === "spectator_overflow"
+              noMatchReason === "roster_overshoot"
                 ? `<p>You arrived in time, but another pair had already formed, so there was no one
                      left for us to match you with. That is our scheduling problem, not anything you
                      did.</p>`
+                : noMatchReason === "roster_unexpected_identity"
+                ? `<p>We could not verify a stable pairing for this session, so we ended the study
+                     before the task began. That is our technical issue, not anything you did.</p>`
                 : `<p>We could not find you a partner in the time available. This happens when not
                      enough people happen to be online at the same moment — it is nothing to do with
                      you or your responses.</p>`;
