@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <html>
   <head>
+    <style>
+      .cwg-round-progress {
+        margin: 0 0 0.75em;
+        font-weight: 600;
+      }
+    </style>
     <title>Reference Game — Clark & Wilkes-Gibbs 1986 replication (full-board) — jsPsych multiplayer</title>
     <!-- jsPsych core MUST carry the multiplayer API (jsPsych#3694). SHA-pinned to the #3694 preview
          build (see examples/README.md "Running it" to re-pin). -->
@@ -846,10 +852,14 @@
           jsPsych.abortCurrentTimeline();
         }
       },
-      prompt: (role) =>
-        role === "director"
-          ? "<p><strong>You are the Director.</strong> Describe your tangrams in badge order (1, 2, 3, …) so your partner can arrange theirs the same way. You can talk back and forth as much as you need.</p>"
-          : "<p><strong>You are the Matcher.</strong> For each numbered slot, click the slot and then the tangram your partner says goes there. Fill every slot, then submit.</p>",
+      prompt: (role) => {
+        const round = jsPsych.timelineVariable("round") + 1;
+        const instructions =
+          role === "director"
+            ? "<p><strong>You are the Director.</strong> Describe your tangrams in badge order (1, 2, 3, …) so your partner can arrange theirs the same way. You can talk back and forth as much as you need.</p>"
+            : "<p><strong>You are the Matcher.</strong> For each numbered slot, click the slot and then the tangram your partner says goes there. Fill every slot, then submit.</p>";
+        return `<p class="cwg-round-progress">Round ${round} of ${TRIALS}</p>${instructions}`;
+      },
     };
 
     const gameLoop = {
