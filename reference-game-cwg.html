@@ -640,6 +640,9 @@
     const money = (usd) => `$${usd.toFixed(2)}`;
 
     let lobbyTicker = null;
+    // Immutable per-admission handshake data. Presence decides WHO is eligible; this record only
+    // confirms that both of those currently live members reached the same transition point.
+    let admissionRecord = null;
 
     const lobbyTrial = {
       // Presence, not retained group-session records, admits a dyad. In particular, member-leave
@@ -696,13 +699,35 @@
           clearInterval(lobbyTicker); lobbyTicker = null; unsubscribe();
           if (reason !== "matched") { noMatch = true; noMatchReason = reason; jsPsych.finishTrial({ lobby_outcome: reason }); return; }
           admittedMemberIds = ids;
-          jatosAdapter.sealGroup().then(() => {
-            const p = jatosAdapter.getPresence();
-            const stillLive = ids.length === MIN_PLAYERS && ids.every((id) =>
-              p.assignedMemberIds.includes(id) && p.openChannelMemberIds.includes(id));
-            if (!stillLive) { noMatch = true; noMatchReason = "partner_left_before_seal"; }
-            jsPsych.finishTrial({ lobby_outcome: noMatch ? noMatchReason : "matched", admitted_member_ids: ids });
-          }).catch(() => { noMatch = true; noMatchReason = "seal_failed"; jsPsych.finishTrial({ lobby_outcome: noMatchReason }); });
+          const memberKey = ids.join("|");
+          admissionRecord = { group_id: DYAD_ID, member_key: memberKey, ready_at: Date.now() };
+          const bothReady = () => {
+            const group = jatosAdapter.getAll();
+            return ids.every((id) => {
+              const record = group[id]?.cwg_lobby_admission;
+              return record?.group_id === DYAD_ID && record?.member_key === memberKey;
+            });
+          };
+          const waitForBoth = () => new Promise((resolve, reject) => {
+            if (bothReady()) return resolve();
+            const timeout = setTimeout(() => { stop(); reject(new Error("admission handshake timed out")); }, CONFIG.JATOS_CONNECT_TIMEOUT_MS);
+            const stop = jatosAdapter.subscribe(() => { if (bothReady()) { clearTimeout(timeout); stop(); resolve(); } });
+          });
+          jatosAdapter.push({ cwg_lobby_admission: admissionRecord })
+            .then(waitForBoth)
+            .then(() => jatosAdapter.sealGroup())
+            .then(() => {
+              const p = jatosAdapter.getPresence();
+              const stillLive = ids.every((id) => p.assignedMemberIds.includes(id) && p.openChannelMemberIds.includes(id));
+              if (!stillLive) { noMatch = true; noMatchReason = "partner_left_before_seal"; }
+              jsPsych.finishTrial({ lobby_outcome: noMatch ? noMatchReason : "matched", admitted_member_ids: ids });
+            })
+            .catch((error) => {
+              console.error("[jatos] lobby admission failed", error);
+              noMatch = true;
+              noMatchReason = "admission_handshake_failed";
+              jsPsych.finishTrial({ lobby_outcome: noMatchReason });
+            });
         };
         const timer = setTimeout(() => finish("lobby_timeout"), CONFIG.LOBBY_TIMEOUT_MS);
         const observe = ({ snapshot }) => {
@@ -720,7 +745,9 @@
       stimulus: "<p>Pairing you with your partner…</p>", choices: "NO_KEYS",
       on_load: async () => {
         try {
-          await jatosAdapter.push({ name: myName, joinedAt: Date.now(), cwg_dyad_id: DYAD_ID });
+          // push() replaces this participant's group-session entry. Preserve the successful lobby
+          // handshake so a fast client cannot erase it before its peer finishes observing it.
+          await jatosAdapter.push({ name: myName, joinedAt: Date.now(), cwg_dyad_id: DYAD_ID, cwg_lobby_admission: admissionRecord });
           const p = jatosAdapter.getPresence();
           const live = admittedMemberIds.length === MIN_PLAYERS && admittedMemberIds.every((id) => p.assignedMemberIds.includes(id) && p.openChannelMemberIds.includes(id));
           if (live && admittedMemberIds.includes(jatosAdapter.participantId)) {
