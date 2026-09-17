@@ -8,6 +8,7 @@ const check = (name, ok) => results.push([ok ? "PASS" : "FAIL", name]);
 check("loads the pinned JATOS adapter", /adapter-multiplayer-jatos\.js/.test(html));
 check("derives dyad identity from groupId", /DYAD_ID = jatosAdapter\.groupId/.test(html));
 check("uses presence for candidate membership", /jatosAdapter\.subscribePresence\(observe\)/.test(html));
+check("polls current presence to close a missed-event window", /setInterval\(\(\) => observe\(\{ snapshot: jatosAdapter\.getPresence\(\) \}\), 250\)/.test(html));
 check("does not gate admission on open-channel count", !/const live = ids\.length === MIN_PLAYERS && ids\.every\(\(id\) => snapshot\.openChannelMemberIds/.test(html));
 check("requires matching records from both candidate ids", /ids\.every\(\(id\) => \{[\s\S]*cwg_lobby_admission/.test(html));
 check("publishes readiness before sealing", /jatosAdapter\.push\(\{ cwg_lobby_admission: admissionRecord \}\)[\s\S]*?\.then\(waitForBoth\)[\s\S]*?\.then\(\(\) => jatosAdapter\.sealGroup\(\)\)/.test(html));

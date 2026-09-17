@@ -693,10 +693,13 @@
         lobbyTicker = setInterval(tick, 1000);
         let settled = false;
         let unsubscribe = () => {};
+        let presencePoll = null;
         const finish = (reason, ids = []) => {
           if (settled) return;
           settled = true;
-          clearInterval(lobbyTicker); lobbyTicker = null; unsubscribe();
+          clearInterval(lobbyTicker); lobbyTicker = null;
+          if (presencePoll !== null) clearInterval(presencePoll);
+          unsubscribe();
           if (reason !== "matched") { noMatch = true; noMatchReason = reason; jsPsych.finishTrial({ lobby_outcome: reason }); return; }
           admittedMemberIds = ids;
           const memberKey = ids.join("|");
@@ -742,7 +745,11 @@
           if (assignedPair) { clearTimeout(timer); finish("matched", [...ids].sort()); }
         };
         unsubscribe = jatosAdapter.subscribePresence(observe);
+        // JATOS normally emits member callbacks, but a client can subscribe between its initial
+        // snapshot and a peer's completed join. Polling the adapter's immutable current snapshot
+        // closes that missed-callback window; membership still remains the admission authority.
         if (settled) unsubscribe();
+        else presencePoll = setInterval(() => observe({ snapshot: jatosAdapter.getPresence() }), 250);
       },
     };
 
