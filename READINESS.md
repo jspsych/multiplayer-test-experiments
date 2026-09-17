@@ -5,6 +5,10 @@ study on Prolific**, audited 2026-07-29 against the working tree of
 `chore/vendor-multiplayer-bundles` (the only branch that currently runs — `main` still points at the
 broken npm `0.1.0` pins).
 
+Updated direction, 2026-09-17: the proposed first paid run is now a shortened Hawkins-style pilot
+built from PR #19 (`hawkins-cued-fidelity`), with the C&WG implementation stack treated as reusable
+infrastructure to port.
+
 Findings were verified by reading the four vendored bundles in [`vendor/`](vendor/), not just the
 experiment files. Where this document contradicts a header comment in the HTML, this document is
 right and the comment has been corrected.
@@ -13,10 +17,15 @@ right and the comment has been corrected.
 mechanism, no attrition handling, and no data save target at all**. Two of those three are fixable
 without waiting on upstream.
 
-**Decision: run `reference-game-cwg.html` as the first paid study, not Hawkins.** 6 trials (~25 min)
-vs 72 trials (~55 min) changes pair-based attrition economics by roughly 3× (see
-[Cost](#5-cost)), and the C&WG words-per-figure effect (41→8) is larger and more robust than
-Hawkins' block-wise shortening.
+**Current direction: run a shortened Hawkins-style pilot first, built from PR #19
+(`hawkins-cued-fidelity`).** The proposed first paid run is not the full 6-block / 72-round Hawkins
+replication. It is a 3-block / 36-round multiplayer pilot whose primary goal is to prove the paid-run
+pipeline: pairing, data egress, terminal routing, participant handling, and operational cost. The
+reference-shortening effect remains a scientific target, but the shortened design should be described
+as an adapted Hawkins pilot rather than a full replication.
+
+The C&WG paid-run stack is still valuable: it contains the tested infrastructure that should be
+ported to Hawkins. But C&WG is no longer the intended first launch target.
 
 ---
 
@@ -100,12 +109,15 @@ round**, starting a fresh timer. There is no cross-round abort and no presence c
 
 | | per-round dead wait | rounds left if partner drops on round 1 | total dead time |
 | --- | --- | --- | --- |
-| **Hawkins** | 60 s | 71 | **~71 min** |
+| **Hawkins, full 6-block replication** | 60 s | 71 | **~71 min** |
+| **Hawkins, proposed 3-block pilot** | 60 s | 35 | **~35 min** |
 | **C&WG** | 180 s | 5 | **~15 min** |
 
 And the survivor is **never told anything**. The plugin contains no partner-status copy, no
 "disconnected" state, no UI affordance — searching for waiting/partner-status strings returns
-nothing. They see a normal, fully interactive board that simply never responds, 72 times over.
+nothing. In the proposed Hawkins pilot, they could still see a normal, fully interactive board that
+simply never responds for up to 36 rounds. That is better than the full 72-round replication, but it
+is still not an acceptable paid-study experience.
 
 Realistically they abandon within minutes, so **the survivor is lost too**, and their data never
 leaves the browser (§3). One dropout burns two payments *and* generates a support ticket.
@@ -121,9 +133,10 @@ leaves the browser (§3). One dropout burns two payments *and* generates a suppo
 - [ ] A **survivor payment path**: partial completion code, data flushed, honest debrief. Highest
       value item in this section and **not blocked upstream** — two or three consecutive
       `ended_by: "timeout"` rounds is a perfectly good dropout proxy, no presence API required.
-- [ ] A decision on **partial-data usability**. A dyad that dies at C&WG trial 4 still has 3 clean
-      trials; for a 6-trial design that is worth keeping. Requires `n_trials_completed` in the data
-      to filter on. **This decision determines what the abort path does, so make it first.**
+- [ ] A decision on **partial-data usability**. In the proposed 36-round Hawkins pilot, a dyad that
+      dies after one or two blocks may still provide useful operational data and a partial learning
+      curve. Requires `n_trials_completed`, `blocks_completed`, and the configured block count in the
+      data. **This decision determines what the abort path does, so make it first.**
 
 ---
 
@@ -146,7 +159,8 @@ Consequences:
 
 **Fix (unblocked, do first):** jsPsych DataPipe (`pipe.jspsych.org` → OSF). Wire it to
 **incremental** saving, not only `on_finish` — with pair-based attrition, `on_finish`-only saving
-loses exactly the sessions that matter. Save per-round, and on the abort path.
+loses exactly the sessions that matter. Save during the task and on the abort path; choose the
+Hawkins save cadence deliberately rather than inheriting the 6-round C&WG per-round shape by habit.
 
 ### DataPipe's session counter is a live hazard — decide `limitSessions` deliberately
 
@@ -155,8 +169,10 @@ the experiment. Incremental saving works, but the endpoint behaves in a way the 
 Read from source (`jspsych/datapipe`, `origin/main`, `functions/src/api-data.ts`, 2026-07-30):
 
 **`sessions` increments on every successful save call, not once per participant.** The cap is checked
-before anything else, and exceeding it returns a 400 and drops the data. So one C&WG participant
-saving per round consumes **7 sessions** (6 rounds + final flush), not 1.
+before anything else, and exceeding it returns a 400 and drops the data. A naive per-round save in a
+36-round Hawkins pilot would consume roughly **37 sessions per participant** (36 rounds + final
+flush), not 1. That makes a participant-sized `limitSessions` cap even more dangerous than it was for
+the 6-round C&WG design.
 
 | Option | Pros | Cons |
 | --- | --- | --- |
@@ -292,34 +308,40 @@ All Prolific researcher help-centre articles, verified 2026-07-30:
 All amounts are in **USD**, since that is the currency participants are paid in. Prolific's own
 thresholds are $8.00/hr minimum and $12.00/hr recommended ([source](https://researcher-help.prolific.com/en/articles/445230-prolific-s-payment-model), verified 2026-07-30).
 
-**Suggested (tentative) rate: $15.00/hr**, above Prolific's recommendation. The task is 25 minutes of
-sustained real-time coordination with another person and no ability to pause, and attention *is* the
-measurement here. Rate also partly pays for itself: dropout is multiplicative on dyads, so if better
-pay moves per-participant dropout from 15% to 10%, dyad survival goes 0.72 → 0.81 and the number of
-dyads you must start falls from ~28 to ~25 — recovering roughly a third of the extra cost.
+**Suggested (tentative) rate: $15.00/hr**, above Prolific's recommendation. The task is sustained
+real-time coordination with another person and no ability to pause, and attention *is* the
+measurement here. Rate also partly pays for itself: dropout is multiplicative on dyads, so better pay
+can reduce the number of dyads that must be started to reach the same number of usable pairs.
 
 A 33% Prolific service fee applies on top of participant pay throughout.
 
-**C&WG** (~25 min: instructions + comprehension + lobby + 6 trials) → $6.25/participant,
-**$8.31 all-in**. Attrition is multiplicative on dyads; at ~15% per-participant mid-task dropout
-(reasonable for a 25-min synchronous task with good framing), dyad survival ≈ 0.72:
+**Hawkins, proposed 3-block pilot** (~30 min placeholder: instructions + comprehension + lobby + 36
+single-target rounds) → $7.50/participant, **$9.98 all-in**. Attrition is multiplicative on dyads;
+until the first pilot measures it directly, assume something between the old C&WG estimate and the
+full Hawkins estimate. At ~20% per-participant mid-task dropout, dyad survival ≈ 0.64:
 
 | | for 20 usable dyads |
 | --- | --- |
-| dyads to start | ~28 |
-| participants recruited | ~56 |
+| dyads to start | ~32 |
+| participants recruited | ~64 |
 | of which usable | 40 |
-| **paid but unusable** | **~16** (dropouts + their stranded survivors) |
-| **cost** | **~$465** |
+| **paid but unusable** | **~24** (dropouts + their stranded survivors) |
+| **cost** | **~$640** |
 
 Add the no-match exits (~10–15% of participants at ~$1.66 all-in each, so roughly $10–15 — see §4),
 plus headroom for one wasted session while learning real arrival-rate and attrition numbers.
-**Budget ~$580 for the first real run.**
+**Budget roughly $750–850 for the first real 3-block Hawkins pilot**, pending measured duration and
+observed attrition.
 
-**Hawkins** (~55 min) → $13.75/participant, **$18.29 all-in**, and 72 synchronous trials realistically
-push per-participant dropout to ~30%, so dyad survival ≈ 0.49 → ~41 dyads → ~82 participants →
-**~$1,500** for the same 20 dyads. Three-plus times the cost, with the §2 survivor-grind failure mode
-at its worst.
+For comparison, the **full Hawkins replication** (~55 min / 72 rounds) still looks much more
+expensive: $13.75/participant, **$18.29 all-in**, and 72 synchronous trials plausibly push
+per-participant dropout toward ~30%, so dyad survival ≈ 0.49 → ~41 dyads → ~82 participants →
+**~$1,500** for the same 20 usable dyads. That remains a poor first test of the paid-run
+infrastructure.
+
+The earlier C&WG estimate (~25 min / 6 full-board trials) was ~$580 for the first real run. The
+reason to switch anyway is strategic rather than purely economic: the first paid run is now framed
+as a multiplayer-pipeline pilot for the Hawkins-style task, with replication as a secondary goal.
 
 ### Two structural cost levers, both large
 
@@ -327,8 +349,9 @@ at its worst.
   *concurrently*, which Prolific does not guarantee. You control it by launching in a tight burst
   rather than leaving the study open — which is why the waiting room and its timeout policy are
   load-bearing on cost, not just on UX.
-- **Partial-data salvage.** With C&WG's 6 trials, a dyad dying at trial 4 yields 3 usable trials. If
-  the analysis can use partial dyads, effective attrition cost drops substantially.
+- **Partial-data salvage.** With 36 Hawkins rounds, a dyad dying after block 1 or block 2 may still
+  answer operational questions and contribute to a partial shortening curve. If the analysis can use
+  partial dyads, effective attrition cost drops substantially.
 
 ---
 
@@ -496,28 +519,31 @@ Then the phase-2 gate: **#11** before **#10**, because whether presence is expos
 expiry gets built (`onDisconnect` tombstones if yes, a staleness sweep if no). **#9** ships in the
 same commit as the adapter swap. **#12** last.
 
-**Do phase 1 against `reference-game-cwg.html` only.** The two files are near-duplicates and every
-phase-1 item applies to both, but C&WG is the first paid run (§5) and back-porting to Hawkins before
-the pilot means writing every fix twice against assumptions the pilot may invalidate. Factoring the
-shared plumbing into a common module is the right end state, but two concrete implementations are a
-better basis for that extraction than one speculative one. Re-cost Hawkins only after #12 replaces
-the assumed 15% / 30% dropout figures in §5 with observed ones.
+**Do phase 1 against a Hawkins paid-pilot branch built from PR #19 (`hawkins-cued-fidelity`).** The
+C&WG stack already contains useful implementations of identifiers, DataPipe egress, completion-code
+routing, dropout aborts, no-match exits, and terminal-route tests, but those are now source material
+to port rather than the target of the first launch. Keep the three-block decision explicit in
+configuration and saved data (`config_blocks: 3`, `config_trials: 36`, and a pilot/study-variant
+field), because a shortened Hawkins pilot is not a full six-block replication.
 
 ### Phase 1 — now, no upstream dependency
 
 - [ ] [#3](https://github.com/jspsych/multiplayer-test-experiments/issues/3) — **Data egress**
-      (DataPipe/OSF, incremental saves). Highest value per line of code in this document; without it
-      every other fix produces nothing analyzable.
+      (DataPipe/OSF, incremental saves), ported to Hawkins. Highest value per line of code in this
+      document; without it every other fix produces nothing analyzable. For Hawkins, avoid assuming
+      one save per trial is the final shape until the save-count/cost tradeoff is reviewed.
 - [ ] [#4](https://github.com/jspsych/multiplayer-test-experiments/issues/4) — **Dyad + Prolific
       identifiers** on every row via `addProperties` (`dyad_id`, `PROLIFIC_PID`, `STUDY_ID`,
-      `SESSION_ID`).
+      `SESSION_ID`), plus Hawkins pilot provenance (`config_blocks`, `config_trials`,
+      `study_variant`).
 - [ ] [#5](https://github.com/jspsych/multiplayer-test-experiments/issues/5) — **Timeout-based
       dropout detection + abort path** (N consecutive `ended_by: "timeout"` → flush data → "partner
-      disconnected" screen → partial completion code). Kills the 71-minute grind with no presence API.
+      disconnected" screen → partial completion code). Kills the 35-minute three-block survivor
+      grind with no presence API.
 - [ ] [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6) — **Lobby timeout +
       no-match exit + payment path**, and fix the spectator dead-end.
 - [ ] [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) — **Completion codes +
-      submission redirect** (three codes: complete / partner-dropped / no-match). Small, and a
+      submission redirect** (complete / partner-dropped / no-match / screened-out). Small, and a
       blocking dependency of both #5 and #6 — neither payment path can be built without it.
 - [ ] [#13](https://github.com/jspsych/multiplayer-test-experiments/issues/13) — **Prolific
       wrapper**: consent, instructions with partner-expectation framing, comprehension check,
@@ -528,8 +554,8 @@ the assumed 15% / 30% dropout figures in §5 with observed ones.
 ### Phase 2 — after `adapter-multiplayer-firebase` publishes
 
 - [ ] [#9](https://github.com/jspsych/multiplayer-test-experiments/issues/9) — **Fix `SEED`
-      derivation for Firebase** (§1). Do this *in the same change* as the adapter swap, or you will
-      collect a wave of confounded data that looks fine.
+      derivation for Firebase/JATOS group IDs** (§1). Do this *in the same change* as the adapter
+      swap, or you will collect a wave of confounded data that looks fine.
 - [ ] [#10](https://github.com/jspsych/multiplayer-test-experiments/issues/10) — Build the
       **rolling waiting room** (room bucketing, stale-room expiry, odd-arrival handling). Largest
       remaining piece.
