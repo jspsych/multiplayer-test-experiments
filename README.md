@@ -35,6 +35,20 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
 > it ends are logged as `ended_by: "timeout"` with a null assignment, so they're easy to exclude.
 
+## Current pilot direction
+
+The proposed first paid Prolific run is now a shortened Hawkins-style multiplayer pilot, built from
+the Hawkins fidelity work in PR #19 (`hawkins-cued-fidelity`) rather than from the older prototype
+file in the C&WG infrastructure stack. The working design is 3 blocks x 12 tangrams = 36 rounds.
+That is an intentional adaptation: the main goal of the first paid run is to prove the multiplayer
+pipeline, including pairing, data saving, terminal routes, and participant handling. The
+reference-shortening replication is still a scientific target, but the shortened pilot should not be
+described as a full six-block Hawkins replication.
+
+The C&WG paid-run stack remains valuable source material for infrastructure: centralized run
+configuration, Prolific identifiers, DataPipe egress, no-match routing, dropout handling, and tests
+should be ported to Hawkins rather than treating C&WG as the first launch target.
+
 ## Running it
 
 These currently run on `adapter-multiplayer-local` (no backend needed) for two-tab piloting:
@@ -45,13 +59,22 @@ These currently run on `adapter-multiplayer-local` (no backend needed) for two-t
    into a second tab so a second player joins.
 4. The first tab becomes the director, the second the matcher.
 
-For a paid Prolific run, swap `adapter-multiplayer-local` for
-[`adapter-multiplayer-firebase`](https://github.com/jspsych/jspsych-multiplayer/tree/main/packages/adapter-multiplayer-firebase)
-(one script-tag swap, see the header comment in each file) plus a real waiting room for pairing.
+## Running it as a paid study
 
-**Note on package versions:** the `@jspsych-multiplayer/*` package script tags below are pinned to
-`0.1.0` on jsDelivr, but those packages are not yet published to npm — publishing is gated on
-[jspsych-multiplayer PR #35](https://github.com/jspsych/jspsych-multiplayer/pull/35) ("Version
-Packages") merging. Until then, either build the packages from a local checkout of
-jspsych-multiplayer and swap in relative `dist/` paths, or wait for the publish and confirm the
-pinned version still matches.
+**Not yet possible — see [`READINESS.md`](READINESS.md)** for a full audit. In short: there is no
+pairing mechanism for strangers, no partner-dropout handling, and no data save target, and
+cross-device pairing is gated on the unpublished
+[`adapter-multiplayer-firebase`](https://github.com/jspsych/jspsych-multiplayer/tree/main/packages/adapter-multiplayer-firebase).
+
+The local adapter remains pilot-only. Moving beyond two-tab local testing requires a real
+pairing/waiting-room path, a shared dyad identifier for seeding and saved rows, Prolific completion
+routing, and remote data egress. Swapping the adapter is **not** a one-script-tag change: `SEED` is
+derived from the `?mp_session=` param that the *local* adapter generates, so on Firebase every dyad
+would silently receive the same trial order. `READINESS.md` lists what actually has to change, and
+which items are blocked upstream.
+
+**Note on package versions:** the current `main` branch still needs the vendor-baseline work from
+PR #1 before it is the recommended runnable baseline. The relevant `@jspsych-multiplayer/*` packages
+are unpublished or incompatible in their npm `0.1.0` form; PR #1 vendors the known-compatible browser
+bundles and documents the pinning. Do not repoint the experiments to npm until compatible packages
+have actually been published and verified.
