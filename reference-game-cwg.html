@@ -718,8 +718,11 @@
             .then(() => jatosAdapter.sealGroup())
             .then(() => {
               const p = jatosAdapter.getPresence();
-              const stillLive = ids.every((id) => p.assignedMemberIds.includes(id) && p.openChannelMemberIds.includes(id));
-              if (!stillLive) { noMatch = true; noMatchReason = "partner_left_before_seal"; }
+              // Membership/leave is authoritative here. The completed two-sided write handshake
+              // already proves both channels were usable; groupChannels can lag membership during
+              // JATOS lifecycle transitions and must not undo a valid admission.
+              const stillAssigned = ids.every((id) => p.assignedMemberIds.includes(id));
+              if (!stillAssigned) { noMatch = true; noMatchReason = "partner_left_before_seal"; }
               jsPsych.finishTrial({ lobby_outcome: noMatch ? noMatchReason : "matched", admitted_member_ids: ids });
             })
             .catch((error) => {
@@ -732,8 +735,11 @@
         const timer = setTimeout(() => finish("lobby_timeout"), CONFIG.LOBBY_TIMEOUT_MS);
         const observe = ({ snapshot }) => {
           const ids = snapshot.assignedMemberIds;
-          const live = ids.length === MIN_PLAYERS && ids.every((id) => snapshot.openChannelMemberIds.includes(id));
-          if (live) { clearTimeout(timer); finish("matched", [...ids].sort()); }
+          // Do not gate on openChannelMemberIds. A leave event / assigned membership is the
+          // authoritative transition; the handshake below proves that both current members can
+          // actually exchange group-session writes.
+          const assignedPair = ids.length === MIN_PLAYERS;
+          if (assignedPair) { clearTimeout(timer); finish("matched", [...ids].sort()); }
         };
         unsubscribe = jatosAdapter.subscribePresence(observe);
         if (settled) unsubscribe();
@@ -749,8 +755,8 @@
           // handshake so a fast client cannot erase it before its peer finishes observing it.
           await jatosAdapter.push({ name: myName, joinedAt: Date.now(), cwg_dyad_id: DYAD_ID, cwg_lobby_admission: admissionRecord });
           const p = jatosAdapter.getPresence();
-          const live = admittedMemberIds.length === MIN_PLAYERS && admittedMemberIds.every((id) => p.assignedMemberIds.includes(id) && p.openChannelMemberIds.includes(id));
-          if (live && admittedMemberIds.includes(jatosAdapter.participantId)) {
+          const stillAssigned = admittedMemberIds.length === MIN_PLAYERS && admittedMemberIds.every((id) => p.assignedMemberIds.includes(id));
+          if (stillAssigned && admittedMemberIds.includes(jatosAdapter.participantId)) {
             const director = admittedMemberIds[Math.abs([...DYAD_ID].reduce((n, c) => ((n * 31) + c.charCodeAt(0)) | 0, 0)) % MIN_PLAYERS];
             myRole = jatosAdapter.participantId === director ? "director" : "matcher";
             partnerId = admittedMemberIds.find((id) => id !== jatosAdapter.participantId);
