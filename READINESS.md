@@ -2,8 +2,9 @@
 
 Status of `reference-game-hawkins.html` and `reference-game-cwg.html` as candidates for a **real paid
 study on Prolific**, audited 2026-07-29 against the working tree of
-`chore/vendor-multiplayer-bundles` (the only branch that currently runs — `main` still points at the
-broken npm `0.1.0` pins).
+`chore/vendor-multiplayer-bundles`. That baseline vendors the unpublished/incompatible multiplayer
+bundles and is included in this branch; if this branch is merged directly to `main`, the readiness
+docs and the runnable vendor baseline land together.
 
 Updated direction, 2026-09-17: the proposed first paid run is now a shortened Hawkins-style pilot
 built from PR #19 (`hawkins-cued-fidelity`), with the C&WG implementation stack treated as reusable
@@ -378,8 +379,8 @@ Worth stating explicitly, because the list above is long:
   warns about is real but not currently triggered.
 
 > **Do not "fix" the `vendor/` pins back to npm.** The published `0.1.0` builds predate the
-> `jsPsych.multiplayer` namespace migration and do not work with the pinned core. `main` currently
-> has exactly this bug, having reverted the vendoring. See [`vendor/README.md`](vendor/README.md).
+> `jsPsych.multiplayer` namespace migration and do not work with the pinned core. See
+> [`vendor/README.md`](vendor/README.md).
 
 ---
 
