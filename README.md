@@ -35,6 +35,20 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
 > it ends are logged as `ended_by: "timeout"` with a null assignment, so they're easy to exclude.
 
+## Current pilot direction
+
+The proposed first paid Prolific run is now a shortened Hawkins-style multiplayer pilot, built from
+the Hawkins fidelity work in PR #19 (`hawkins-cued-fidelity`) rather than from the older prototype
+file in the C&WG infrastructure stack. The working design is 3 blocks x 12 tangrams = 36 rounds.
+That is an intentional adaptation: the main goal of the first paid run is to prove the multiplayer
+pipeline, including pairing, data saving, terminal routes, and participant handling. The
+reference-shortening replication is still a scientific target, but the shortened pilot should not be
+described as a full six-block Hawkins replication.
+
+The C&WG paid-run stack remains valuable source material for infrastructure: centralized run
+configuration, Prolific identifiers, DataPipe egress, no-match routing, dropout handling, and tests
+should be ported to Hawkins rather than treating C&WG as the first launch target.
+
 ## Running it
 
 These currently run on `adapter-multiplayer-local` (no backend needed) for two-tab piloting:
@@ -52,9 +66,12 @@ pairing mechanism for strangers, no partner-dropout handling, and no data save t
 cross-device pairing is gated on the unpublished
 [`adapter-multiplayer-firebase`](https://github.com/jspsych/jspsych-multiplayer/tree/main/packages/adapter-multiplayer-firebase).
 
-Swapping the adapter is **not** a one-script-tag change: `SEED` is derived from the `?mp_session=`
-param that the *local* adapter generates, so on Firebase every dyad would silently receive the same
-trial order. `READINESS.md` lists what actually has to change, and which items are blocked upstream.
+The local adapter remains pilot-only. Moving beyond two-tab local testing requires a real
+pairing/waiting-room path, a shared dyad identifier for seeding and saved rows, Prolific completion
+routing, and remote data egress. Swapping the adapter is **not** a one-script-tag change: `SEED` is
+derived from the `?mp_session=` param that the *local* adapter generates, so on Firebase every dyad
+would silently receive the same trial order. `READINESS.md` lists what actually has to change, and
+which items are blocked upstream.
 
 **Note on package versions:** the four `@jspsych-multiplayer/*` bundles load from
 [`vendor/`](vendor/README.md) in this repo, not npm — `plugin-multiplayer-reference-game` is
