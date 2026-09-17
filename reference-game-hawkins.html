@@ -8,9 +8,9 @@
     <script src="https://unpkg.com/@jspsych/plugin-survey-text"></script>
     <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response"></script>
     <script src="https://unpkg.com/@jspsych/plugin-preload"></script>
-    <!-- STUDY PROTOTYPE: on the LOCAL adapter for two-tab piloting on one machine. For the paid Prolific
-         run, swap adapter-multiplayer-local → adapter-multiplayer-firebase (and pair via a real waiting
-         room); nothing else in this file changes. -->
+    <!-- HAWKINS PAID-PILOT CANDIDATE: still on the LOCAL adapter for two-tab piloting. A real paid
+         run still needs a deployed pairing adapter/waiting room and shared dyad IDs; this file only
+         ports the paid-run participant/data/terminal-route plumbing onto the Hawkins task. -->
     <!-- TODO: pin to a real published version once jspsych-multiplayer PR #35 (Version Packages) merges -->
     <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/adapter-multiplayer-local@0.1.0/dist/index.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-sync@0.1.0/dist/index.browser.min.js"></script>
@@ -110,7 +110,8 @@
     //   • 12 tangrams (the canonical set, shared with Clark & Wilkes-Gibbs 1986), in a 6×2 grid,
     //     independently scrambled per player each trial (can't point by position).
     //   • SINGLE target per trial; the matcher clicks the one tangram they think the director means.
-    //   • 6 repetition blocks × 12 trials = 72 trials; each tangram is the target once per block.
+    //   • Faithful Hawkins uses 6 repetition blocks × 12 trials = 72 trials; each tangram is the
+    //     target once per block. This paid-pilot candidate intentionally uses 3 blocks = 36 trials.
     //   • Director/matcher roles fixed for the whole game.
     //   • "Cued" version: only the director sees which tangram is the target (reveal_target_to).
     //   • Free text chat, UNRESTRICTED both ways (both may send, no count/length limit) — the paper's
@@ -125,12 +126,14 @@
     // Re-audited line by line against the original source (OSF osf.io/vzvmf → github component =
     // hawkrobe/tangrams, `experiments/tangrams_sequential`, i.e. the "cued" version — the README
     // there defines cued as "a sequential version that cues each target in a sequence of trials").
-    // Confirmed identical: 2 players; fixed director/matcher; 6×2 grid of SQUARE cells; 72 rounds as
-    // 6 shuffled blocks of 12 (game.core.js `getRandomizedConditions`); layouts re-randomised every
-    // round, independently per player; target revealed to the director only; unrestricted two-way
-    // chat; per-round chat log; the matcher-click gate (`globalGame.messageSent`); 3000ms of
-    // feedback before the next round (game.server.js `setTimeout(..., 3000)`); a typing indicator
-    // (sharedUtils/clientBase.js `playerTyping`); and a persistent round counter + running score.
+    // Confirmed identical in the full-fidelity version: 2 players; fixed director/matcher; 6×2 grid
+    // of SQUARE cells; 72 rounds as 6 shuffled blocks of 12 (game.core.js
+    // `getRandomizedConditions`); layouts re-randomised every round, independently per player;
+    // target revealed to the director only; unrestricted two-way chat; per-round chat log; the
+    // matcher-click gate (`globalGame.messageSent`); 3000ms of feedback before the next round
+    // (game.server.js `setTimeout(..., 3000)`); a typing indicator (sharedUtils/clientBase.js
+    // `playerTyping`); and a persistent round counter + running score. The paid pilot departs from
+    // that schedule only by using 3 blocks instead of 6, and records that in every saved row.
     //
     // Position disjointness and per-role feedback were gaps until the plugin gained
     // `scramble_mode: "disjoint"` and role-keyed `feedback_content`; both are now used below, and
@@ -140,23 +143,62 @@
     //      typing anything. The plugin counts only the PARTNER's message. Ours is the stricter (and,
     //      judging by the source comment, the intended) reading.
     //
-    // The remaining departure is not a design choice: `round_timeout` (60s) has no counterpart in the
-    // original, which ran
-    // untimed. It exists so a disconnected or absent partner cannot hang the trial forever. Rounds it
-    // ends are recorded as `ended_by: "timeout"` with a null assignment — filter on that when
-    // analysing, and raise it if piloting shows real trials running long.
+    // `round_timeout` (60s) has no counterpart in the original, which ran untimed. It exists so a
+    // disconnected or absent partner cannot hang the trial forever, but it is an unconditional round
+    // clock, not proof of dropout. The paid-pilot routes below infer partner dropout only after
+    // consecutive silent timed-out rounds.
     //
-    // Key replication DVs (logged per round): message_count / messages_sent (words-per-reference proxy),
-    // accuracy / correct, rt. Expected: descriptions shorten strongly across blocks; accuracy near
-    // ceiling by the final block.
+    // Key DVs (logged per round): message_count / messages_sent (words-per-reference proxy),
+    // accuracy / correct, rt. In this shortened pilot, operational outcomes are primary; the
+    // reference-shortening replication is secondary and should not be described as a full 6-block
+    // Hawkins replication.
     // ===============================================================================================
 
     const MIN_PLAYERS = 2;
-    // Faithful is 6. Lower this (e.g. 1–2) for a quick two-tab smoke test, then restore to 6.
-    const BLOCKS = 6;
+
+    const CONFIG = {
+      PILOT_LABEL: "hawkins-three-block-paid-pilot",
+      BLOCKS: 3,
+      COMPLETION_CODES: {
+        complete: "",
+        partner_dropped: "",
+        no_match: "",
+        screened_out: "",
+      },
+      ROUND_TIMEOUT_MS: 60000,
+      DATAPIPE_EXPERIMENT_ID: "",
+      LOBBY_TIMEOUT_MS: 300000,
+      NO_MATCH_PAYMENT_USD: 1.25,
+      DROPOUT_SILENT_ROUNDS: 2,
+      SAVE_PER_ROUND: true,
+      FLUSH_ON_ABORT: true,
+      SAVE_MAX_ATTEMPTS: 3,
+      SAVE_BASE_BACKOFF_MS: 500,
+      SAVE_REDIRECT_BUDGET_MS: 3000,
+      PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
+    };
+
+    const BLOCKS = CONFIG.BLOCKS;
 
     const jsPsych = initJsPsych();
     const localAdapter = new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
+
+    /**
+     * Deployment-specific work ends here. The timeline below receives a stable dyad key and,
+     * when a deployment can provide it, an allocated roster. A future JATOS/Firebase bootstrap
+     * may obtain those values differently, but must not make the Hawkins timeline inspect an
+     * adapter-specific API.
+     */
+    async function connectLocalDeployment() {
+      await jsPsych.multiplayer.connect(localAdapter);
+      const sessionId = new URLSearchParams(location.search).get("mp_session");
+      if (!sessionId) {
+        throw new Error(
+          "Local multiplayer bootstrap did not produce an mp_session value after connecting.",
+        );
+      }
+      return { sessionId, allocatedParticipantIds: null };
+    }
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
     // Seed the schedule from the SHARED SESSION ID, so each dyad gets its own trial order while the
@@ -169,9 +211,200 @@
     // Swapping to the Firebase adapter: seed from whatever identifies the dyad there (e.g. the room
     // id) — the requirement is only that both partners derive the same value.
     const SEED = new URLSearchParams(location.search).get("mp_session") ?? "hawkins-sequential";
-    // 72 rounds: 6 blocks × 12, each tangram once per block. Deterministic given the seed, so both
-    // tabs agree without exchanging anything.
+    // 36 paid-pilot rounds: 3 blocks × 12, each tangram once per block. Deterministic given the
+    // seed, so both tabs agree without exchanging anything.
     const SCHEDULE = Tangrams.sequentialSchedule(BLOCKS, SEED);
+
+    const prolificParams = new URLSearchParams(location.search);
+    const PROLIFIC_PID = prolificParams.get("PROLIFIC_PID");
+    const STUDY_ID = prolificParams.get("STUDY_ID");
+    const SESSION_ID = prolificParams.get("SESSION_ID");
+    const DYAD_ID = prolificParams.get("mp_session") ?? "hawkins-sequential";
+
+    jsPsych.data.addProperties({
+      prolific_pid: PROLIFIC_PID,
+      study_id: STUDY_ID,
+      session_id: SESSION_ID,
+      dyad_id: DYAD_ID,
+      participant_id: localAdapter.participantId ?? null,
+      experiment_file: "reference-game-hawkins.html",
+      study_variant: CONFIG.PILOT_LABEL,
+      config_blocks: CONFIG.BLOCKS,
+      config_trials: SCHEDULE.length,
+      config_n_stimuli: SHAPES.length,
+      config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
+      viewport_w: window.innerWidth,
+      viewport_h: window.innerHeight,
+      screen_w: window.screen?.width ?? null,
+      screen_h: window.screen?.height ?? null,
+      user_agent: navigator.userAgent,
+    });
+
+    function submissionBlockHTML(codeKey) {
+      const code = CONFIG.COMPLETION_CODES[codeKey];
+      if (!code) {
+        return `<p style="color:#b00"><strong>Something has gone wrong on our end.</strong> Your
+                responses have been recorded, but the completion code for this exit
+                (<code>${codeKey}</code>) is missing, so the automatic submission cannot run.</p>
+                <p style="color:#b00">Please <strong>message the researcher from this study's page on
+                Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>. You will be
+                paid — do not return the study. Please keep this tab open until you have sent it.</p>`;
+      }
+      return `<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
+              <p style="font-size:0.9em">If that button does not work, your completion code is
+              <code style="user-select:all">${code}</code> — paste it into Prolific to submit.</p>`;
+    }
+
+    function redirectToProlific(codeKey) {
+      const code = CONFIG.COMPLETION_CODES[codeKey];
+      if (!code) {
+        console.error(`No Prolific completion code configured for "${codeKey}".`);
+        return;
+      }
+      window.location.href = `${CONFIG.PROLIFIC_SUBMIT_URL}?cc=${encodeURIComponent(code)}`;
+    }
+
+    function wireSubmissionButton(codeKey) {
+      document
+        .getElementById("prolific-submit")
+        ?.addEventListener("click", () => redirectToProlific(codeKey));
+    }
+
+    (function warnOnUnsetConfig() {
+      const unset = Object.entries(CONFIG.COMPLETION_CODES)
+        .filter(([, v]) => !v)
+        .map(([k]) => k);
+      if (unset.length) console.warn(`Unset Prolific completion code(s): ${unset.join(", ")}`);
+      if (!CONFIG.DATAPIPE_EXPERIMENT_ID) {
+        console.warn("DataPipe experiment ID is unset; remote saving is inert.");
+      }
+      if (DYAD_ID === "hawkins-sequential") {
+        console.warn("DYAD_ID/SEED fell back to a constant; this is only acceptable for local smoke tests.");
+      }
+    })();
+
+    const DATAPIPE_ENDPOINT = "https://pipe.jspsych.org/api/data/";
+
+    const Pipeline = (() => {
+      let claimedUntil = 0;
+      let chunkSeq = 0;
+      const pending = [];
+      const log = [];
+      const nonce = () =>
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+      function classify(status, error) {
+        if (status >= 200 && status < 300) return "ok";
+        if (status === 400 && error === "OSF_FILE_EXISTS") return "exists";
+        if (status === 429 || status >= 500) return "retry";
+        return "terminal";
+      }
+
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      function claimRows() {
+        const rows = jsPsych.data.get().values();
+        const claims = [];
+        for (const p of pending.splice(0)) claims.push(p);
+        if (claimedUntil < rows.length) {
+          claims.push({ start: claimedUntil, end: rows.length - 1 });
+          claimedUntil = rows.length;
+        }
+        const merged = [];
+        for (const r of claims.sort((a, b) => a.start - b.start)) {
+          const last = merged.at(-1);
+          if (last && r.start <= last.end + 1) last.end = Math.max(last.end, r.end);
+          else merged.push({ ...r });
+        }
+        return {
+          rows,
+          ranges: merged,
+          trials: merged.flatMap(({ start, end }) => rows.slice(start, end + 1)),
+        };
+      }
+
+      function requeue(ranges) {
+        pending.push(...ranges.map((r) => ({ ...r })));
+      }
+
+      async function postChunk(payload) {
+        const response = await fetch(DATAPIPE_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = await response.json().catch(() => ({}));
+        return {
+          status: response.status,
+          retryAfter: Number(response.headers.get("Retry-After") ?? 0),
+          error: body.error ?? null,
+        };
+      }
+
+      async function save(label) {
+        if (!CONFIG.DATAPIPE_EXPERIMENT_ID) return { ok: false, skipped: true };
+        const claim = claimRows();
+        if (!claim.trials.length) return { ok: true, empty: true };
+
+        const seq = chunkSeq++;
+        const fileNonce = nonce();
+        const safeParticipant = localAdapter.participantId ?? "unknown-participant";
+        const safeDyad = DYAD_ID ?? SEED ?? "unknown-dyad";
+        const filename = `${safeDyad}_${safeParticipant}_${seq}_${label}_${fileNonce}.json`;
+        const payload = {
+          experimentID: CONFIG.DATAPIPE_EXPERIMENT_ID,
+          filename,
+          data: JSON.stringify({
+            dyad_id: DYAD_ID,
+            prolific_pid: PROLIFIC_PID,
+            participant_id: localAdapter.participantId ?? null,
+            chunk_seq: seq,
+            chunk_label: label,
+            row_ranges: claim.ranges.map(({ start, end }) => [start, end]),
+            trials: claim.trials,
+            saved_at: new Date().toISOString(),
+          }),
+        };
+
+        let last = null;
+        for (let attempt = 1; attempt <= CONFIG.SAVE_MAX_ATTEMPTS; attempt++) {
+          try {
+            last = await postChunk(payload);
+            const kind = classify(last.status, last.error);
+            if (kind === "ok") {
+              const rec = JSON.parse(payload.data);
+              log.push({ filename, ...rec });
+              return { ok: true, status: last.status };
+            }
+            if (kind === "exists" && attempt > 1) {
+              const rec = JSON.parse(payload.data);
+              log.push({ filename, ...rec, replayed: true });
+              return { ok: true, replayed: true, status: last.status };
+            }
+            if (kind === "terminal" || kind === "exists") {
+              requeue(claim.ranges);
+              return { ok: false, status: last.status, error: last.error };
+            }
+            const wait = last.retryAfter ? last.retryAfter * 1000 : CONFIG.SAVE_BASE_BACKOFF_MS * attempt;
+            await sleep(wait);
+          } catch (err) {
+            last = { error: err?.message ?? String(err) };
+            if (attempt < CONFIG.SAVE_MAX_ATTEMPTS) await sleep(CONFIG.SAVE_BASE_BACKOFF_MS * attempt);
+          }
+        }
+        requeue(claim.ranges);
+        return { ok: false, error: last?.error ?? "save_failed" };
+      }
+
+      async function flush(label) {
+        const timeout = new Promise((resolve) =>
+          setTimeout(() => resolve({ ok: false, timedOut: true }), CONFIG.SAVE_REDIRECT_BUDGET_MS)
+        );
+        return Promise.race([save(label), timeout]);
+      }
+
+      return { save, flush, log: () => log.slice(), _classify: classify };
+    })();
 
     // The 12 tangrams are real PNGs, and `rt` is a reported DV — without this the first exposure to
     // each image loads mid-trial. `stimuli` is an OBJECT parameter, so jsPsych's automatic media
@@ -185,6 +418,34 @@
     let myName = "";
     let myRole;
     let partnerId;
+    let bootstrap;
+    let observedRosterIds = [];
+    let noMatch = false;
+    let noMatchReason = null;
+    let partnerDropped = false;
+    let dropoutRound = null;
+    let consecutiveSilentRounds = 0;
+    let endedReason = null;
+
+    const completedTrials = () =>
+      jsPsych.data
+        .get()
+        .filter({ trial_type: "multiplayer-reference-game", ended_by: "submit" })
+        .count();
+
+    function recordOutcome(reason) {
+      if (endedReason) return;
+      endedReason = reason;
+      jsPsych.data.addProperties({
+        ended_reason: reason,
+        n_trials_completed: completedTrials(),
+        n_trials_scheduled: SCHEDULE.length,
+        n_blocks_scheduled: CONFIG.BLOCKS,
+        blocks_completed: Math.floor(completedTrials() / SHAPES.length),
+        dropout_detected_at_round: dropoutRound,
+        no_match_reason: noMatchReason,
+      });
+    }
 
     const nameTrial = {
       type: jsPsychSurveyText,
@@ -194,13 +455,94 @@
       },
     };
 
+    const money = (usd) => `$${usd.toFixed(2)}`;
+
+    let lobbyTicker = null;
+
     const lobbyTrial = {
       type: jsPsychMultiplayerSync,
       push_data: () => ({ name: myName, joinedAt: Date.now() }),
-      message: `<p>Waiting for ${MIN_PLAYERS} players to join…</p>
-                <p>Open this page in another tab (keep the <code>?mp_session=</code> in the URL) to add a player.</p>`,
+      timeout: CONFIG.LOBBY_TIMEOUT_MS,
+      message: `<p>Waiting for a partner to join…</p>
+                <p>This study is played in pairs, so we need to match you with someone before we can
+                   start. Most people are matched quickly.</p>
+                <p><strong>Time remaining: <span id="lobby-remaining">—</span></strong></p>
+                <p style="font-size:0.9em;color:#555">If we cannot find you a partner in time, we will
+                   end the study and <strong>still pay you ${money(
+                     CONFIG.NO_MATCH_PAYMENT_USD
+                   )}</strong> for waiting. You do not need to do anything.</p>
+                <p style="font-size:0.85em;color:#888">Testing locally? Open this page in another tab,
+                   keeping the <code>?mp_session=</code> in the URL.</p>`,
       wait_for: (group) =>
         Object.values(group).filter((entry) => entry && entry.name).length >= MIN_PLAYERS,
+      on_load: () => {
+        const deadline = Date.now() + CONFIG.LOBBY_TIMEOUT_MS;
+        const el = document.getElementById("lobby-remaining");
+        const tick = () => {
+          const left = Math.max(0, deadline - Date.now());
+          if (!el) return;
+          if (left < 1000) {
+            el.textContent = "finishing up…";
+            return;
+          }
+          const m = Math.floor(left / 60000);
+          const s = Math.floor((left % 60000) / 1000);
+          el.textContent = `${m}:${String(s).padStart(2, "0")}`;
+        };
+        tick();
+        lobbyTicker = setInterval(tick, 1000);
+      },
+      on_finish: (data) => {
+        clearInterval(lobbyTicker);
+        lobbyTicker = null;
+        if (data.timed_out) {
+          noMatch = true;
+          noMatchReason = "lobby_timeout";
+        }
+      },
+    };
+
+    /**
+     * `getAll()` is visible participant state, not an immutable membership authority. When a
+     * deployment has supplied a roster, compare against it exactly. The local two-tab bootstrap
+     * deliberately has no such roster, so it can only enforce the weaker exact-count check.
+     */
+    const rosterValidationTrial = {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: "<p>Checking the pairing…</p>",
+      choices: "NO_KEYS",
+      trial_duration: 0,
+      on_finish: () => {
+        if (noMatch) return;
+        const group = jsPsych.multiplayer.getAll();
+        observedRosterIds = Object.entries(group)
+          .filter(([, entry]) => entry && entry.name)
+          .map(([id]) => id)
+          .sort();
+        const allocated = bootstrap?.allocatedParticipantIds?.slice().sort() ?? null;
+
+        if (observedRosterIds.length < MIN_PLAYERS) {
+          noMatch = true;
+          noMatchReason = "roster_undershoot";
+        } else if (observedRosterIds.length > MIN_PLAYERS) {
+          noMatch = true;
+          noMatchReason = "roster_overshoot";
+        } else if (
+          allocated !== null &&
+          (allocated.length !== MIN_PLAYERS ||
+            allocated.some((id, index) => id !== observedRosterIds[index]))
+        ) {
+          noMatch = true;
+          noMatchReason = "roster_unexpected_identity";
+        }
+
+        jsPsych.data.addProperties({
+          bootstrap_session_id: bootstrap?.sessionId ?? null,
+          bootstrap_roster_supplied: allocated !== null,
+          observed_roster_ids: observedRosterIds,
+          observed_roster_count: observedRosterIds.length,
+        });
+      },
     };
 
     // Fixed director/matcher for the whole game, assigned by deterministic consensus (shared seed from
@@ -210,9 +552,9 @@
       type: jsPsychMultiplayerRole,
       roles: ["director", "matcher"],
       strategy: "random",
-      overflow_role: "spectator",
+      group_size: MIN_PLAYERS,
       ready: (group) =>
-        Object.keys(group).length >= MIN_PLAYERS &&
+        Object.keys(group).length === MIN_PLAYERS &&
         Object.values(group).every((entry) => entry && entry.joinedAt != null),
       save_group: true,
       message: "<p>Pairing you with your partner…</p>",
@@ -220,20 +562,59 @@
         myRole = jsPsychMultiplayerRole.getMyRole();
         const byRole = jsPsychMultiplayerRole.participantsByRole();
         partnerId = myRole === "director" ? byRole.matcher?.[0] : byRole.director?.[0];
+        if (myRole !== "director" && myRole !== "matcher") {
+          noMatch = true;
+          noMatchReason = "pairing_timeout";
+        }
       },
     };
 
-    const spectatorScreen = {
+    const pairingPhase = {
+      timeline: [roleTrial],
+      conditional_function: () => !noMatch,
+    };
+
+    const noMatchScreen = {
       timeline: [
         {
           type: jsPsychHtmlKeyboardResponse,
-          stimulus: "<p>This game is already full. Thanks for your interest!</p>",
+          stimulus: () => {
+            const waited =
+              noMatchReason === "spectator_overflow"
+                ? `<p>You arrived in time, but another pair had already formed, so there was no one
+                     left for us to match you with. That is our scheduling problem, not anything you
+                     did.</p>`
+                : `<p>We could not find you a partner in the time available. This happens when not
+                     enough people happen to be online at the same moment — it is nothing to do with
+                     you or your responses.</p>`;
+            return `<h2>We could not match you with a partner</h2>
+                ${waited}
+                <p><strong>You will still be paid ${money(
+                  CONFIG.NO_MATCH_PAYMENT_USD
+                )} for your time.</strong> Please submit below so we can process it.</p>
+                <p id="save-status" style="font-size:0.9em;color:#666">Saving…</p>
+                ${submissionBlockHTML("no_match")}`;
+          },
           choices: "NO_KEYS",
-          trial_duration: 4000,
-          on_finish: () => jsPsych.multiplayer.disconnect(),
+          on_load: () => {
+            wireSubmissionButton("no_match");
+            recordOutcome(noMatchReason ?? "no_match");
+            jsPsych.multiplayer.disconnect();
+            Pipeline.flush(`no-match-${noMatchReason ?? "unknown"}`).then((r) => {
+              const el = document.getElementById("save-status");
+              if (!el) return;
+              el.textContent = r.skipped
+                ? ""
+                : r.ok
+                ? "Saved."
+                : r.timedOut
+                ? "Still uploading — you can submit now, this will finish in the background."
+                : "Upload failed. Please submit anyway and message the researcher.";
+            });
+          },
         },
       ],
-      conditional_function: () => myRole === "spectator",
+      conditional_function: () => noMatch,
     };
 
     // =============================================================================================
@@ -366,7 +747,7 @@
         director: { reveal_target: false, show_score: false, show_partner_choice: true },
         matcher: { reveal_target: true, show_score: false, show_partner_choice: false },
       },
-      round_timeout: 60000, // NOT in the original — bounds the round if the partner leaves (see header)
+      round_timeout: CONFIG.ROUND_TIMEOUT_MS, // NOT in the original — bounds the round if the partner leaves
       save_interaction_history: true,
       // Instruction wording taken from the original (game.client.js `client_onjoingame`). The one
       // edit: the original tells BOTH roles they may "talk to the director", plainly a copy-paste
@@ -395,13 +776,62 @@
       // The original has a typing indicator too (sharedUtils/clientBase.js: `playerTyping.true` on
       // input, `.false` when the box is emptied, rendered as "Other player is typing...").
       on_load: startTypingIndicator,
-      on_finish: stopTypingIndicator,
+      on_finish: (data) => {
+        stopTypingIndicator();
+        if (CONFIG.SAVE_PER_ROUND) Pipeline.save(`round-${data.round ?? "?"}`);
+
+        const partnerMessages = (data.message_count ?? 0) - (data.messages_sent ?? 0);
+        const silent = data.ended_by === "timeout" && partnerMessages <= 0;
+        consecutiveSilentRounds = silent ? consecutiveSilentRounds + 1 : 0;
+
+        if (!partnerDropped && consecutiveSilentRounds >= CONFIG.DROPOUT_SILENT_ROUNDS) {
+          partnerDropped = true;
+          dropoutRound = data.round ?? null;
+          recordOutcome("partner_dropped");
+          jsPsych.abortCurrentTimeline();
+        }
+      },
     };
 
     const gameLoop = {
       timeline: [gameRound],
       timeline_variables: SCHEDULE,
       conditional_function: () => myRole === "director" || myRole === "matcher",
+    };
+
+    const partnerDroppedScreen = {
+      timeline: [
+        {
+          type: jsPsychHtmlKeyboardResponse,
+          stimulus: () => {
+            const played = completedTrials();
+            return `<h2>Your partner seems to have disconnected</h2>
+                <p>We waited, but your partner stopped responding, so we have ended the study here.
+                   <strong>This is not your fault, and your payment is not affected.</strong></p>
+                <p>You completed ${played} of ${SCHEDULE.length} round${played === 1 ? "" : "s"} together, and
+                   ${played > 0 ? "that work is saved and still useful to us" : "your time is still paid"}.</p>
+                <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
+                ${submissionBlockHTML("partner_dropped")}`;
+          },
+          choices: "NO_KEYS",
+          on_load: () => {
+            wireSubmissionButton("partner_dropped");
+            jsPsych.multiplayer.disconnect();
+            Pipeline.flush("abort-partner-dropped").then((r) => {
+              const el = document.getElementById("save-status");
+              if (!el) return;
+              el.textContent = r.skipped
+                ? ""
+                : r.ok
+                ? "Your responses have been saved."
+                : r.timedOut
+                ? "Still uploading — you can submit now, this will finish in the background."
+                : "Your responses could not be uploaded. Please submit anyway and message the researcher.";
+            });
+          },
+        },
+      ],
+      conditional_function: () => partnerDropped,
     };
 
     const doneTrial = {
@@ -416,10 +846,28 @@
                 <p>Together you got <strong>${correct} of ${played}</strong> round${
           played === 1 ? "" : "s"
         } correct.</p>
-                <p>You may close this tab. <button id="dl">Download data (JSON)</button></p>`;
+                <p>Thank you — please submit to complete the study.</p>
+                <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
+                ${submissionBlockHTML("complete")}
+                <p style="font-size:0.85em;color:#666">
+                  Researcher tools: <button id="dl" type="button">Download data (JSON)</button>
+                </p>`;
       },
       choices: "NO_KEYS",
       on_load: () => {
+        wireSubmissionButton("complete");
+        recordOutcome("complete");
+        Pipeline.flush("complete").then((r) => {
+          const el = document.getElementById("save-status");
+          if (!el) return;
+          el.textContent = r.skipped
+            ? ""
+            : r.ok
+            ? "Your responses have been saved."
+            : r.timedOut
+            ? "Still uploading — you can submit now, this will finish in the background."
+            : "Your responses could not be uploaded. Please submit anyway and message the researcher.";
+        });
         document
           .getElementById("dl")
           ?.addEventListener("click", () =>
@@ -428,18 +876,37 @@
       },
     };
 
-    jsPsych.multiplayer.connect(localAdapter).then(() => {
+    const completeScreen = {
+      timeline: [doneTrial],
+      conditional_function: () =>
+        !partnerDropped && (myRole === "director" || myRole === "matcher"),
+    };
+
+    connectLocalDeployment()
+      .then((connectedBootstrap) => {
+        bootstrap = connectedBootstrap;
+        if (bootstrap.sessionId !== DYAD_ID || bootstrap.sessionId !== SEED) {
+          throw new Error("Local deployment bootstrap disagrees with the schedule/dyad session ID.");
+        }
       // Preload FIRST, before pairing: a participant who is still fetching images while their
       // partner waits in the lobby wastes the partner's time.
-      jsPsych.run([
-        preloadTrial,
-        nameTrial,
-        lobbyTrial,
-        roleTrial,
-        spectatorScreen,
-        gameLoop,
-        doneTrial,
-      ]);
-    });
+        jsPsych.run([
+          preloadTrial,
+          nameTrial,
+          lobbyTrial,
+          rosterValidationTrial,
+          pairingPhase,
+          gameLoop,
+          noMatchScreen,
+          partnerDroppedScreen,
+          completeScreen,
+        ]);
+      })
+      .catch((error) => {
+        console.error("Could not initialize the local multiplayer deployment", error);
+        noMatch = true;
+        noMatchReason = "bootstrap_error";
+        jsPsych.run([noMatchScreen]);
+      });
   </script>
 </html>
