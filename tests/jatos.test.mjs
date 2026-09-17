@@ -6,6 +6,10 @@ const results = [];
 const check = (name, ok) => results.push([ok ? "PASS" : "FAIL", name]);
 
 check("loads the pinned JATOS adapter", /adapter-multiplayer-jatos\.js/.test(html));
+const onLoadAt = html.indexOf("jatos.onLoad(async () =>");
+const adapterConstructAt = html.indexOf("new jsPsychAdapterMultiplayerJatos", onLoadAt);
+check("constructs the adapter after JATOS onLoad", onLoadAt !== -1 && adapterConstructAt > onLoadAt);
+check("updates the actual jsPsych lobby stimulus element", /#jspsych-html-keyboard-response-stimulus/.test(html));
 check("derives dyad identity from groupId", /DYAD_ID = jatosAdapter\.groupId/.test(html));
 check("uses presence for candidate membership", /jatosAdapter\.subscribePresence\(observe\)/.test(html));
 check("polls current presence to close a missed-event window", /setInterval\(\(\) => observe\(\{ snapshot: jatosAdapter\.getPresence\(\) \}\), 250\)/.test(html));

@@ -178,9 +178,10 @@
     };
 
     const jsPsych = initJsPsych();
-    const jatosAdapter = new jsPsychAdapterMultiplayerJatos({
-      connectTimeoutMs: CONFIG.JATOS_CONNECT_TIMEOUT_MS,
-    });
+    // jatos.studyResultId is populated by JATOS during onLoad. The adapter captures its
+    // participantId in the constructor, so constructing earlier makes every client write under an
+    // undefined/worker fallback key and breaks the per-member admission handshake.
+    let jatosAdapter = null;
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams
     // Seed the schedule from the SHARED SESSION ID, so each dyad gets its own target orders while the
@@ -231,7 +232,7 @@
       session_id: SESSION_ID,
       dyad_id: DYAD_ID,
       // Own participant id, so the two sides of a dyad are distinguishable within it.
-      participant_id: jatosAdapter.participantId ?? null,
+      participant_id: jatosAdapter?.participantId ?? null,
       // Run provenance — needed to interpret data collected while piloting at different values.
       experiment_file: "reference-game-cwg.html",
       config_trials: TRIALS,
@@ -665,7 +666,7 @@
                    keeping the <code>?mp_session=</code> in the URL.</p>`,
       choices: "NO_KEYS",
       on_load: () => {
-        const root = document.querySelector(".jspsych-html-keyboard-response-stimulus");
+        const root = document.querySelector("#jspsych-html-keyboard-response-stimulus");
         if (root) root.innerHTML = `<p>Waiting for a partner to join…</p>
           <p>This study is played in pairs, so we need to match you with someone before we can start.</p>
           <p><strong>Time remaining: <span id="lobby-remaining">—</span></strong></p>
@@ -1030,6 +1031,12 @@
 
     jatos.onLoad(async () => {
       try {
+        jatosAdapter = new jsPsychAdapterMultiplayerJatos({
+          connectTimeoutMs: CONFIG.JATOS_CONNECT_TIMEOUT_MS,
+        });
+        if (jatosAdapter.participantId !== String(jatos.studyResultId)) {
+          throw new Error("JATOS studyResultId was unavailable when creating the multiplayer adapter.");
+        }
         await jsPsych.multiplayer.connect(jatosAdapter);
         DYAD_ID = jatosAdapter.groupId;
         if (!DYAD_ID) throw new Error("JATOS connected without a group ID");
@@ -1057,9 +1064,9 @@
       ]);
       } catch (error) {
         console.error("[jatos] could not initialize group study", error);
-        DYAD_ID = `unassigned-${jatosAdapter.participantId ?? "anon"}`;
+        DYAD_ID = `unassigned-${jatosAdapter?.participantId ?? "anon"}`;
         SEED = DYAD_ID;
-        jsPsych.data.addProperties({ dyad_id: DYAD_ID, participant_id: jatosAdapter.participantId ?? null });
+        jsPsych.data.addProperties({ dyad_id: DYAD_ID, participant_id: jatosAdapter?.participantId ?? null });
         noMatch = true;
         noMatchReason = "adapter_connect_error";
         jsPsych.run([noMatchScreen]);
