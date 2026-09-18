@@ -197,7 +197,13 @@
           "Local multiplayer bootstrap did not produce an mp_session value after connecting.",
         );
       }
-      return { sessionId, allocatedParticipantIds: null };
+      return {
+        sessionId,
+        allocatedParticipantIds: null,
+        // The local adapter has no server-side allocation to lock. Keep the same hook shape as
+        // production deployments so the timeline never needs to know which backend it is using.
+        finalizeAllocation: async () => null,
+      };
     }
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
@@ -542,6 +548,41 @@
           observed_roster_ids: observedRosterIds,
           observed_roster_count: observedRosterIds.length,
         });
+      },
+    };
+
+    /**
+     * A deployment that owns allocation can atomically finish its own admission work here and
+     * return the roster that the timeline must validate. The local implementation is a no-op.
+     * This hook is deliberately outside every multiplayer plugin: plugins remain portable and do
+     * not depend on optional backend lifecycle APIs.
+     */
+    const finalizeAllocationTrial = {
+      type: jsPsychHtmlKeyboardResponse,
+      stimulus: "<p>Finalizing the pairing...</p>",
+      choices: "NO_KEYS",
+      on_load: async () => {
+        try {
+          const allocation = await bootstrap.finalizeAllocation();
+          if (allocation != null) {
+            if (allocation.sessionId !== bootstrap.sessionId) {
+              throw new Error("Allocation finalization changed the dyad session ID.");
+            }
+            bootstrap = { ...bootstrap, ...allocation };
+          }
+          jsPsych.finishTrial({
+            allocation_finalized: true,
+            allocated_roster_ids: bootstrap.allocatedParticipantIds ?? null,
+          });
+        } catch (error) {
+          console.error("Could not finalize the multiplayer allocation", error);
+          noMatch = true;
+          noMatchReason = "allocation_finalize_error";
+          jsPsych.finishTrial({
+            allocation_finalized: false,
+            allocation_error: error instanceof Error ? error.message : String(error),
+          });
+        }
       },
     };
 
@@ -897,6 +938,7 @@
           preloadTrial,
           nameTrial,
           lobbyTrial,
+          finalizeAllocationTrial,
           rosterValidationTrial,
           pairingPhase,
           gameLoop,

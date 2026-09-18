@@ -12,7 +12,7 @@ check(
 );
 check(
   "bootstrap returns the shared local session id rather than an adapter-private group id",
-  /return \{ sessionId, allocatedParticipantIds: null \};/.test(html),
+  /sessionId,[\s\S]*?allocatedParticipantIds: null,[\s\S]*?finalizeAllocation: async \(\) => null/.test(html),
 );
 check(
   "requires the bootstrap session id to match the schedule and dyad id",
@@ -45,7 +45,11 @@ check(
 );
 check(
   "runs roster validation between the lobby and role pairing phases",
-  /lobbyTrial,[\s\S]*?rosterValidationTrial,[\s\S]*?pairingPhase,/.test(html),
+  /lobbyTrial,[\s\S]*?finalizeAllocationTrial,[\s\S]*?rosterValidationTrial,[\s\S]*?pairingPhase,/.test(html),
+);
+check(
+  "keeps optional allocation finalization outside the portable plugins",
+  /const finalizeAllocationTrial[\s\S]*?bootstrap\.finalizeAllocation\(\)/.test(html),
 );
 
 for (const [status, name] of results) console.log(`${status}  ${name}`);
