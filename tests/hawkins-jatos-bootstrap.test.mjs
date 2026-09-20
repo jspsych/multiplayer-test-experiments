@@ -5,14 +5,16 @@ const results = [];
 const check = (name, condition) => results.push([condition ? "PASS" : "FAIL", name]);
 
 check(
-  "connects through the multiplayer extension with a fresh JatosAdapter",
-  /await jsPsych\.multiplayer\.connect\(new JatosAdapter\(\)\)/.test(src),
+  "connects through the multiplayer extension with a JatosAdapter",
+  /const adapter = new JatosAdapter\(\);[\s\S]*?await jsPsych\.multiplayer\.connect\(adapter\)/.test(
+    src,
+  ),
 );
 
 check(
   "reads groupResultId after connect, not before",
-  src.indexOf("connect(new JatosAdapter())") !== -1 &&
-    src.indexOf("connect(new JatosAdapter())") < src.indexOf("jatos.groupResultId"),
+  src.indexOf("multiplayer.connect(adapter)") !== -1 &&
+    src.indexOf("multiplayer.connect(adapter)") < src.indexOf("jatos.groupResultId"),
 );
 
 check(
@@ -23,6 +25,11 @@ check(
 check(
   "reports a null allocated roster (stock JATOS presence is not an allocation)",
   /allocatedParticipantIds: null/.test(src) && /finalizeAllocation: null/.test(src),
+);
+
+check(
+  "surfaces the adapter's stable per-client id behind a portable participantId field",
+  /participantId: adapter\.participantId \?\? null/.test(src),
 );
 
 check(

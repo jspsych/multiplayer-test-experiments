@@ -49,7 +49,31 @@ check(
 );
 check(
   "keeps optional allocation finalization outside the portable plugins",
-  /const finalizeAllocationTrial[\s\S]*?bootstrap\.finalizeAllocation\(\)/.test(html),
+  /const finalizeAllocationTrial[\s\S]*?bootstrap\.finalizeAllocation\?\.\(\)/.test(html),
+);
+check(
+  "local bootstrap surfaces the adapter identity behind a portable participantId field",
+  /participantId: localAdapter\.participantId \?\? null/.test(html),
+);
+check(
+  "routes a bootstrapError to the no-match screen without a pre-run throw",
+  /bootstrap\.bootstrapError != null[\s\S]*?noMatchReason = "bootstrap_error"[\s\S]*?jsPsych\.run\(\[noMatchScreen\]\)/.test(
+    html,
+  ),
+);
+check(
+  "adopts a deployment-supplied session for dyad id and schedule seed before run",
+  /DYAD_ID \?\?= bootstrap\.sessionId/.test(html) &&
+    /gameLoop\.timeline_variables = SCHEDULE/.test(html),
+);
+check(
+  "takes the typing indicator from the plugin instead of a study bolt-on",
+  /typing_indicator: true/.test(html) && !/function startTypingIndicator/.test(html),
+);
+check(
+  "loads the prototype multiplayer bundles from vendor rather than incompatible npm pins",
+  /src="vendor\/plugin-multiplayer-reference-game\.js"/.test(html) &&
+    !/adapter-multiplayer-local@0\.1\.0/.test(html),
 );
 
 for (const [status, name] of results) console.log(`${status}  ${name}`);

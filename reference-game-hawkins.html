@@ -11,11 +11,12 @@
     <!-- HAWKINS PAID-PILOT CANDIDATE: still on the LOCAL adapter for two-tab piloting. A real paid
          run still needs a deployed pairing adapter/waiting room and shared dyad IDs; this file only
          ports the paid-run participant/data/terminal-route plumbing onto the Hawkins task. -->
-    <!-- TODO: pin to a real published version once jspsych-multiplayer PR #35 (Version Packages) merges -->
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/adapter-multiplayer-local@0.1.0/dist/index.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-sync@0.1.0/dist/index.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-role@0.1.0/dist/index.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-reference-game@0.1.0/dist/index.browser.min.js"></script>
+    <!-- PROTOTYPE: branch-built bundles from vendor/ (see vendor/README.md for provenance).
+         Pre-release pins — repoint to published versions after upstream PR #80 + PR #35. -->
+    <script src="vendor/adapter-multiplayer-local.js"></script>
+    <script src="vendor/plugin-multiplayer-sync.js"></script>
+    <script src="vendor/plugin-multiplayer-role.js"></script>
+    <script src="vendor/plugin-multiplayer-reference-game.js"></script>
     <script src="tangrams.js"></script>
     <link
       rel="stylesheet"
@@ -83,9 +84,10 @@
         background: #2b8a3e;
       }
 
-      /* "Partner is typing…" hint. The original has one too (sharedUtils/clientBase.js sends
-         `playerTyping.true/false` and renders "Other player is typing..." in the message log). */
-      .jspsych-multiplayer-reference-game .typing-hint {
+      /* "Partner is typing…" hint rendered by the plugin's `typing_indicator` option. The original
+         has one too (sharedUtils/clientBase.js sends `playerTyping.true/false` and renders
+         "Other player is typing..." in the message log). */
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-typing-hint {
         min-height: 1.2em;
         margin-bottom: 0.3em;
         font-size: 0.9em;
@@ -93,7 +95,7 @@
         color: #555;
         text-align: left;
       }
-      .jspsych-multiplayer-reference-game .typing-hint[hidden] {
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-typing-hint[hidden] {
         display: block;
         visibility: hidden;
       }
@@ -199,6 +201,9 @@
       }
       return {
         sessionId,
+        // The local adapter's stable per-client id, surfaced behind the portable field so the
+        // timeline never reads adapter identity inline (the JATOS bootstrap returns its own).
+        participantId: localAdapter.participantId ?? null,
         allocatedParticipantIds: null,
         // The local adapter has no server-side allocation to lock. Keep the same hook shape as
         // production deployments so the timeline never needs to know which backend it is using.
@@ -211,28 +216,34 @@
     // two partners still agree on it. A fixed seed would hand every dyad the identical order, which
     // confounds item order with repetition block — the very axis this study measures.
     //
-    // Read AFTER the adapter is constructed, deliberately: on the first tab there is no `?mp_session=`
-    // yet, and the LocalAdapter constructor is what generates one and writes it into the URL. The
-    // second tab arrives with it already in the pasted link, so both compute the same schedule.
-    // Swapping to the Firebase adapter: seed from whatever identifies the dyad there (e.g. the room
-    // id) — the requirement is only that both partners derive the same value.
-    const SEED = new URLSearchParams(location.search).get("mp_session") ?? "hawkins-sequential";
+    // Local two-tab: read AFTER the adapter is constructed, deliberately: on the first tab there is
+    // no `?mp_session=` yet, and the LocalAdapter constructor is what generates one and writes it
+    // into the URL. The second tab arrives with it already in the pasted link, so both compute the
+    // same schedule. Deployment adapters (e.g. JATOS groupResultId) only know the shared session
+    // AFTER connect, so a null seed here means "adopt bootstrap.sessionId once connected" (below) —
+    // the requirement is only that both partners derive the same value.
+    let SEED = new URLSearchParams(location.search).get("mp_session") ?? null;
     // 36 paid-pilot rounds: 3 blocks × 12, each tangram once per block. Deterministic given the
-    // seed, so both tabs agree without exchanging anything.
-    const SCHEDULE = Tangrams.sequentialSchedule(BLOCKS, SEED);
+    // seed, so both tabs agree without exchanging anything. Recomputed post-connect when the seed
+    // was deployment-supplied; `config_trials` below only reads the length, which never changes.
+    let SCHEDULE = SEED != null ? Tangrams.sequentialSchedule(BLOCKS, SEED) : [];
 
     const prolificParams = new URLSearchParams(location.search);
     const PROLIFIC_PID = prolificParams.get("PROLIFIC_PID");
     const STUDY_ID = prolificParams.get("STUDY_ID");
     const SESSION_ID = prolificParams.get("SESSION_ID");
-    const DYAD_ID = prolificParams.get("mp_session") ?? "hawkins-sequential";
+    // Null until the bootstrap resolves (below): local two-tab reads it from the URL, deployment
+    // adapters adopt the deployment session id. Re-stamped into jsPsych data once connected.
+    let DYAD_ID = prolificParams.get("mp_session") ?? null;
 
     jsPsych.data.addProperties({
       prolific_pid: PROLIFIC_PID,
       study_id: STUDY_ID,
       session_id: SESSION_ID,
       dyad_id: DYAD_ID,
-      participant_id: localAdapter.participantId ?? null,
+      // Overwritten from bootstrap.participantId once connected (below): the timeline must not
+      // read adapter-private identity, so no adapter handle appears here.
+      participant_id: null,
       experiment_file: "reference-game-hawkins.html",
       study_variant: CONFIG.PILOT_LABEL,
       config_blocks: CONFIG.BLOCKS,
@@ -284,8 +295,8 @@
       if (!CONFIG.DATAPIPE_EXPERIMENT_ID) {
         console.warn("DataPipe experiment ID is unset; remote saving is inert.");
       }
-      if (DYAD_ID === "hawkins-sequential") {
-        console.warn("DYAD_ID/SEED fell back to a constant; this is only acceptable for local smoke tests.");
+      if (DYAD_ID == null || SEED == null) {
+        console.warn("DYAD_ID/SEED are deployment-supplied; adopting them after connect.");
       }
     })();
 
@@ -354,7 +365,7 @@
 
         const seq = chunkSeq++;
         const fileNonce = nonce();
-        const safeParticipant = localAdapter.participantId ?? "unknown-participant";
+        const safeParticipant = bootstrap?.participantId ?? "unknown-participant";
         const safeDyad = DYAD_ID ?? SEED ?? "unknown-dyad";
         const filename = `${safeDyad}_${safeParticipant}_${seq}_${label}_${fileNonce}.json`;
         const payload = {
@@ -363,7 +374,7 @@
           data: JSON.stringify({
             dyad_id: DYAD_ID,
             prolific_pid: PROLIFIC_PID,
-            participant_id: localAdapter.participantId ?? null,
+            participant_id: bootstrap?.participantId ?? null,
             chunk_seq: seq,
             chunk_label: label,
             row_ranges: claim.ranges.map(({ start, end }) => [start, end]),
@@ -563,7 +574,9 @@
       choices: "NO_KEYS",
       on_load: async () => {
         try {
-          const allocation = await bootstrap.finalizeAllocation();
+          // finalizeAllocation is optional: deployments without an allocated roster (local two-tab
+          // smoke, stock JATOS) report null and skip straight to roster validation.
+          const allocation = await bootstrap.finalizeAllocation?.();
           if (allocation != null) {
             if (allocation.sessionId !== bootstrap.sessionId) {
               throw new Error("Allocation finalization changed the dyad session ID.");
@@ -661,100 +674,10 @@
       conditional_function: () => noMatch,
     };
 
-    // =============================================================================================
-    // "Partner is typing…" indicator.
-    //
-    // The reference-game plugin has no typing indicator, so this is bolted on from the experiment
-    // using the multiplayer API directly — no plugin fork. It reads/writes ONE extra key in this
-    // participant's session slot, `typing_at` (a timestamp, or null), and renders the partner's.
-    //
-    // Why it is safe to write into the same slot the plugin writes:
-    //   `push` REPLACES the whole slot, so every writer must read-modify-write. JS is single
-    //   threaded and each read+push below happens in ONE synchronous block, so the plugin's chat and
-    //   submit pushes can never interleave between this read and this push — no lost message. The
-    //   only writer of my slot is my own tab.
-    //
-    // Rationale for the two constants: the TTL must exceed the throttle, or the hint blinks off
-    // between a continuously-typing partner's pushes.
-    //
-    // The original has this feature (sharedUtils/clientBase.js `playerTyping`), and it matters with
-    // the click gate on: the matcher sits blocked until the director's first message, and this is
-    // what distinguishes "they're composing a description" from "they've gone away".
-    // =============================================================================================
-    const TYPING_TTL = 2500; // hide the hint this long after the partner's last keystroke
-    const TYPING_THROTTLE = 800; // push at most one typing ping per this many ms
-
-    // Torn down at the end of every round by `stopTypingIndicator`; the plugin rebuilds the whole
-    // display each trial, so the hint element and its listeners must be re-created per round too.
-    let typingTeardown = null;
-
-    function startTypingIndicator() {
-      const api = jsPsych.multiplayer;
-      const me = api.participantId;
-      const chat = document.querySelector(".jspsych-multiplayer-reference-game-chat");
-      const form = document.querySelector(".jspsych-multiplayer-reference-game-chat-form");
-      const input = document.querySelector(".jspsych-multiplayer-reference-game-chat-input");
-      if (!chat || !form || !input) return; // chat disabled — nothing to attach to
-
-      const hint = document.createElement("div");
-      hint.className = "typing-hint";
-      hint.setAttribute("role", "status");
-      hint.setAttribute("aria-live", "polite");
-      hint.textContent = `${myRole === "director" ? "Matcher" : "Director"} is typing…`;
-      hint.hidden = true;
-      chat.insertBefore(hint, form);
-
-      // Read-modify-write, synchronously — see the header note.
-      const mark = (ts) => {
-        const mine = api.get(me) ?? {};
-        api.push({ ...mine, typing_at: ts }).catch(() => {});
-      };
-
-      let lastPush = 0;
-      const onInput = () => {
-        if (input.value.trim() === "") {
-          lastPush = 0;
-          mark(null); // cleared the box — stop signalling immediately
-          return;
-        }
-        const now = Date.now();
-        if (now - lastPush < TYPING_THROTTLE) return;
-        lastPush = now;
-        mark(now);
-      };
-      // Runs AFTER the plugin's own submit handler (added first, in trial()), so by the time this
-      // reads the slot the sent message is already in it.
-      const onSend = () => {
-        lastPush = 0;
-        mark(null);
-      };
-
-      const render = () => {
-        const at = partnerId ? api.getAll()?.[partnerId]?.typing_at : null;
-        hint.hidden = !(typeof at === "number" && Date.now() - at < TYPING_TTL);
-      };
-
-      input.addEventListener("input", onInput);
-      form.addEventListener("submit", onSend);
-      const unsubscribe = api.subscribe(render);
-      // subscribe only fires on CHANGES; a partner who stops typing pushes nothing more, so the hint
-      // needs a clock of its own to expire.
-      const ticker = setInterval(render, 500);
-      render();
-
-      typingTeardown = () => {
-        input.removeEventListener("input", onInput);
-        form.removeEventListener("submit", onSend);
-        unsubscribe();
-        clearInterval(ticker);
-        mark(null); // never leave a stale "typing" flag for the next round
-      };
-    }
-
-    function stopTypingIndicator() {
-      typingTeardown?.();
-      typingTeardown = null;
-    }
+    // "Partner is typing…" comes from the plugin's `typing_indicator` option (enabled on the round
+    // below with the original's TTL/throttle semantics), not a study bolt-on: all slot writes go
+    // through the plugin's serialized write queue, so typing pings can neither clobber round/chat
+    // data nor be clobbered by it.
 
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
@@ -818,10 +741,10 @@
           : `${header}<p><strong>You are the Matcher.</strong> ${matcher}</p>`;
       },
       // The original has a typing indicator too (sharedUtils/clientBase.js: `playerTyping.true` on
-      // input, `.false` when the box is emptied, rendered as "Other player is typing...").
-      on_load: startTypingIndicator,
+      // input, `.false` when the box is emptied, rendered as "Other player is typing..."), provided
+      // here by the plugin's serialized write queue rather than a study bolt-on.
+      typing_indicator: true, // TTL 2500ms / throttle 800ms are the plugin defaults, matching the original
       on_finish: (data) => {
-        stopTypingIndicator();
         if (CONFIG.SAVE_PER_ROUND) Pipeline.save(`round-${data.round ?? "?"}`);
 
         const partnerMessages = (data.message_count ?? 0) - (data.messages_sent ?? 0);
@@ -929,6 +852,29 @@
     connectLocalDeployment()
       .then((connectedBootstrap) => {
         bootstrap = connectedBootstrap;
+        if (bootstrap.bootstrapError != null) {
+          // Bootstrap failure, not a session: route to the no-group path through normal
+          // conditionals. A pre-run() throw here would be a dead page.
+          console.error("Multiplayer bootstrap failed:", bootstrap.bootstrapError);
+          noMatch = true;
+          noMatchReason = "bootstrap_error";
+          jsPsych.run([noMatchScreen]);
+          return;
+        }
+        jsPsych.data.addProperties({ participant_id: bootstrap.participantId ?? null });
+        if (DYAD_ID == null || SEED == null) {
+          // Deployment-owned session (e.g. JATOS groupResultId): adopt it for the dyad id and the
+          // schedule seed, then rebuild the schedule BEFORE run so both partners derive the same
+          // order. gameLoop captured the placeholder by reference at eval; repoint it.
+          if (bootstrap.sessionId == null) {
+            throw new Error("Deployment bootstrap supplied no session ID to derive the schedule from.");
+          }
+          DYAD_ID ??= bootstrap.sessionId;
+          SEED ??= bootstrap.sessionId;
+          SCHEDULE = Tangrams.sequentialSchedule(BLOCKS, SEED);
+          gameLoop.timeline_variables = SCHEDULE;
+          jsPsych.data.addProperties({ dyad_id: DYAD_ID });
+        }
         if (bootstrap.sessionId !== DYAD_ID || bootstrap.sessionId !== SEED) {
           throw new Error("Local deployment bootstrap disagrees with the schedule/dyad session ID.");
         }
