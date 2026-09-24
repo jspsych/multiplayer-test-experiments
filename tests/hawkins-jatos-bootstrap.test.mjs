@@ -5,8 +5,8 @@ const results = [];
 const check = (name, condition) => results.push([condition ? "PASS" : "FAIL", name]);
 
 check(
-  "connects through the multiplayer extension with a JatosAdapter",
-  /const adapter = new JatosAdapter\(\);[\s\S]*?await jsPsych\.multiplayer\.connect\(adapter\)/.test(
+  "connects through the multiplayer extension with the bundle's adapter global",
+  /const adapter = new jsPsychAdapterMultiplayerJatos\(\);[\s\S]*?await jsPsych\.multiplayer\.connect\(adapter\)/.test(
     src,
   ),
 );
@@ -46,6 +46,18 @@ check(
 check(
   "never throws before jsPsych.run(); the timeline routes the null session itself",
   !/^\s*throw\b/m.test(src),
+);
+
+check(
+  "waits for jatos.js init (onLoad) before connecting, so joinGroup sees resolved run IDs",
+  src.indexOf("jatos.onLoad") !== -1 &&
+    src.indexOf("jatos.onLoad") < src.indexOf("multiplayer.connect(adapter)"),
+);
+
+check(
+  "constructs the adapter after onLoad, so its snapshotted identity is never 'undefined'",
+  src.indexOf("jatos.onLoad") !== -1 &&
+    src.indexOf("jatos.onLoad") < src.indexOf("new jsPsychAdapterMultiplayerJatos()"),
 );
 
 for (const [status, name] of results) console.log(`${status}  ${name}`);

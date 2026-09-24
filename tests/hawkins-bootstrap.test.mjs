@@ -75,6 +75,17 @@ check(
   /src="vendor\/plugin-multiplayer-reference-game\.js"/.test(html) &&
     !/adapter-multiplayer-local@0\.1\.0/.test(html),
 );
+check(
+  "picks the deployment by JATOS globals and imports the JATOS bootstrap as a module",
+  /typeof jatos !== "undefined"[\s\S]*?typeof jsPsychAdapterMultiplayerJatos !== "undefined"[\s\S]*?await import\("\.\/bootstrap\/jatos\.js"\)/.test(
+    html,
+  ),
+);
+check(
+  "runs the picked deployment bootstrap, not a hardcoded local one",
+  /connectDeployment\(\)[\s\S]*?\.then\(\(connectedBootstrap\)/.test(html) &&
+    !/connectLocalDeployment\(\)\s*\.then/.test(html),
+);
 
 for (const [status, name] of results) console.log(`${status}  ${name}`);
 process.exit(results.every(([status]) => status === "PASS") ? 0 : 1);

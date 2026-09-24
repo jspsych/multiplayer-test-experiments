@@ -8,12 +8,16 @@
     <script src="https://unpkg.com/@jspsych/plugin-survey-text"></script>
     <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response"></script>
     <script src="https://unpkg.com/@jspsych/plugin-preload"></script>
-    <!-- HAWKINS PAID-PILOT CANDIDATE: still on the LOCAL adapter for two-tab piloting. A real paid
-         run still needs a deployed pairing adapter/waiting room and shared dyad IDs; this file only
-         ports the paid-run participant/data/terminal-route plumbing onto the Hawkins task. -->
+    <!-- HAWKINS PAID-PILOT CANDIDATE: runs on the LOCAL adapter for two-tab piloting and on the
+         JATOS adapter inside a JATOS group study; the deployment is picked at load (below) by the
+         presence of the JATOS globals, and the timeline is identical either way. -->
     <!-- PROTOTYPE: branch-built bundles from vendor/ (see vendor/README.md for provenance).
          Pre-release pins — repoint to published versions after upstream PR #80 + PR #35. -->
     <script src="vendor/adapter-multiplayer-local.js"></script>
+    <!-- Served by the JATOS server inside a study; 404s harmlessly on local runs, where the
+         deployment picker below then takes the local path. -->
+    <script src="jatos.js"></script>
+    <script src="vendor/adapter-multiplayer-jatos.js"></script>
     <script src="vendor/plugin-multiplayer-sync.js"></script>
     <script src="vendor/plugin-multiplayer-role.js"></script>
     <script src="vendor/plugin-multiplayer-reference-game.js"></script>
@@ -183,15 +187,20 @@
     const BLOCKS = CONFIG.BLOCKS;
 
     const jsPsych = initJsPsych();
-    const localAdapter = new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
 
     /**
      * Deployment-specific work ends here. The timeline below receives a stable dyad key and,
      * when a deployment can provide it, an allocated roster. A future JATOS/Firebase bootstrap
      * may obtain those values differently, but must not make the Hawkins timeline inspect an
      * adapter-specific API.
+     *
+     * The local adapter is constructed inside this function, not at page load: its constructor
+     * generates an `mp_session` value and writes it into the URL, which would pollute the
+     * SEED/DYAD_ID reads below on deployment paths (e.g. JATOS) that derive the session from
+     * the server instead.
      */
     async function connectLocalDeployment() {
+      const localAdapter = new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
       await jsPsych.multiplayer.connect(localAdapter);
       const sessionId = new URLSearchParams(location.search).get("mp_session");
       if (!sessionId) {
@@ -216,12 +225,12 @@
     // two partners still agree on it. A fixed seed would hand every dyad the identical order, which
     // confounds item order with repetition block — the very axis this study measures.
     //
-    // Local two-tab: read AFTER the adapter is constructed, deliberately: on the first tab there is
-    // no `?mp_session=` yet, and the LocalAdapter constructor is what generates one and writes it
-    // into the URL. The second tab arrives with it already in the pasted link, so both compute the
-    // same schedule. Deployment adapters (e.g. JATOS groupResultId) only know the shared session
-    // AFTER connect, so a null seed here means "adopt bootstrap.sessionId once connected" (below) —
-    // the requirement is only that both partners derive the same value.
+    // Local two-tab: the LocalAdapter (constructed in connectLocalDeployment, below) generates
+    // `?mp_session=` on the first tab and writes it into the URL, so reads here see null on a
+    // fresh first tab and the pasted value on the second tab. Deployment adapters (e.g. JATOS
+    // groupResultId) only know the shared session AFTER connect, so a null seed here means
+    // "adopt bootstrap.sessionId once connected" (below) — the requirement is only that both
+    // partners derive the same value.
     let SEED = new URLSearchParams(location.search).get("mp_session") ?? null;
     // 36 paid-pilot rounds: 3 blocks × 12, each tangram once per block. Deterministic given the
     // seed, so both tabs agree without exchanging anything. Recomputed post-connect when the seed
@@ -849,7 +858,22 @@
         !partnerDropped && (myRole === "director" || myRole === "matcher"),
     };
 
-    connectLocalDeployment()
+    // Deployment picker: JATOS group study when the JATOS globals are present, local two-tab
+    // otherwise. `bootstrap/jatos.js` is an ES module loaded by dynamic import so the single
+    // timeline file stays identical on both deployments (the swap test). If the JATOS adapter
+    // failed to load, fall through to local rather than constructing a broken adapter.
+    async function connectDeployment() {
+      if (
+        typeof jatos !== "undefined" &&
+        typeof jsPsychAdapterMultiplayerJatos !== "undefined"
+      ) {
+        const { connectJatosDeployment } = await import("./bootstrap/jatos.js");
+        return connectJatosDeployment();
+      }
+      return connectLocalDeployment();
+    }
+
+    connectDeployment()
       .then((connectedBootstrap) => {
         bootstrap = connectedBootstrap;
         if (bootstrap.bootstrapError != null) {
@@ -876,7 +900,7 @@
           jsPsych.data.addProperties({ dyad_id: DYAD_ID });
         }
         if (bootstrap.sessionId !== DYAD_ID || bootstrap.sessionId !== SEED) {
-          throw new Error("Local deployment bootstrap disagrees with the schedule/dyad session ID.");
+          throw new Error("Deployment bootstrap disagrees with the schedule/dyad session ID.");
         }
       // Preload FIRST, before pairing: a participant who is still fetching images while their
       // partner waits in the lobby wastes the partner's time.
@@ -894,7 +918,7 @@
         ]);
       })
       .catch((error) => {
-        console.error("Could not initialize the local multiplayer deployment", error);
+        console.error("Could not initialize the multiplayer deployment", error);
         noMatch = true;
         noMatchReason = "bootstrap_error";
         jsPsych.run([noMatchScreen]);

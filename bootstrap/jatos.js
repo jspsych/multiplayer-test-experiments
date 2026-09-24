@@ -18,7 +18,7 @@
  * - paid run: max total workers = sample size, max total/active members = 2.
  *
  * Depends only on globals provided at runtime in a JATOS study: `jsPsych`
- * (with the multiplayer extension), the `JatosAdapter` bundle global, and
+ * (with the multiplayer extension), the `jsPsychAdapterMultiplayerJatos` bundle global, and
  * the `jatos` object auto-injected by JATOS (`jatos.js` must be loaded and
  * the study run on a JATOS server for `groupResultId` to exist).
  */
@@ -27,7 +27,20 @@ export async function connectJatosDeployment() {
   // Held, not inlined, so the bootstrap can surface the adapter's stable
   // per-client id (studyResultId, falling back to workerId) behind the
   // portable `participantId` field — same as the local bootstrap does.
-  const adapter = new JatosAdapter();
+  // NOTE: the browser bundle exposes the class as the `jsPsychAdapterMultiplayerJatos`
+  // global (bare `JatosAdapter` exists only inside the bundle); structural tests cannot
+  // catch a wrong global name, so the JATOS smoke test owns this line.
+  // Wait for jatos.js init BEFORE constructing the adapter (not just before
+  // connecting): the constructor snapshots its identity from
+  // `jatos.studyResultId ?? jatos.workerId` at construction time, and both fields are
+  // only assigned during jatos.js's async init (URL parse + ID-cookie read). Constructing
+  // early bakes in participantId "undefined" for every member, so all lobby pushes land
+  // under one shared "undefined" key and the dyad can never form — while joinGroup itself
+  // reads urlBasePath/studyResultUuid at call time, so it needs the same wait (live
+  // symptom on cortex.jatos.org was "...undefinedpublix/undefined/group/join").
+  // jatos.onLoad fires after init, or immediately if init already finished.
+  await new Promise((resolve) => jatos.onLoad(resolve));
+  const adapter = new jsPsychAdapterMultiplayerJatos();
   await jsPsych.multiplayer.connect(adapter);
   // Read AFTER connect: the group membership only exists once the adapter
   // has joined the JATOS group channel.
