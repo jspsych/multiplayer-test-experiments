@@ -1,215 +1,648 @@
 <!DOCTYPE html>
 <html>
   <head>
+    <meta charset="utf-8" />
     <title>Reference Game — Hawkins et al. 2020 replication (sequential) — jsPsych multiplayer</title>
-    <!-- jsPsych core MUST carry the multiplayer API (jsPsych#3694). SHA-pinned to the #3694 preview
-         build (see examples/README.md "Running it" to re-pin). -->
-    <script src="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@151ab520542a8e48bcc4d5b21c74cdffae8b48c6/packages/jspsych/dist/index.browser.min.js"></script>
-    <script src="https://unpkg.com/@jspsych/plugin-survey-text"></script>
-    <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response"></script>
-    <script src="https://unpkg.com/@jspsych/plugin-preload"></script>
-    <!-- STUDY PROTOTYPE: on the LOCAL adapter for two-tab piloting on one machine. For the paid Prolific
-         run, swap adapter-multiplayer-local → adapter-multiplayer-firebase (and pair via a real waiting
-         room); nothing else in this file changes. -->
-    <!-- TODO: pin to a real published version once jspsych-multiplayer PR #35 (Version Packages) merges -->
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/adapter-multiplayer-local@0.1.0/dist/index.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-sync@0.1.0/dist/index.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-role@0.1.0/dist/index.browser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@jspsych-multiplayer/plugin-multiplayer-reference-game@0.1.0/dist/index.browser.min.js"></script>
+    <!-- Served by JATOS inside a study. On a local server it 404s harmlessly, and the page runs on
+         the local adapter instead (see `onJatos` below). -->
+    <script src="jatos.js"></script>
+    <!-- Everything else loads from vendor/, which `node scripts/vendor.mjs` fills: jsPsych core
+         (a preview build of jsPsych#3694, which adds jsPsych.multiplayer), the jsPsych plugins, and
+         the jspsych-multiplayer bundles, each at the version recorded in vendor/manifest.json.
+         Local copies rather than CDN links, so a JATOS study carries its own dependencies. -->
+    <script src="vendor/jspsych.js"></script>
+    <script src="vendor/plugin-html-keyboard-response.js"></script>
+    <script src="vendor/plugin-preload.js"></script>
+    <script src="vendor/plugin-call-function.js"></script>
+    <script src="vendor/adapter-multiplayer-local.js"></script>
+    <script src="vendor/adapter-multiplayer-jatos.js"></script>
+    <script src="vendor/plugin-multiplayer-role.js"></script>
+    <script src="vendor/plugin-multiplayer-reference-game.js"></script>
     <script src="tangrams.js"></script>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/gh/jspsych/jsPsych@151ab520542a8e48bcc4d5b21c74cdffae8b48c6/packages/jspsych/css/jspsych.css"
-    />
+    <script src="hawkins.js"></script>
+    <link rel="stylesheet" href="vendor/jspsych.css" />
+    <style>
+      /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
+         version), OSF osf.io/vzvmf.
+         The original lays out a 6×2 grid of square 300×300px cells (game.core.js), and
+         stimuli/objectSet.js gives each tangram an explicit draw box, e.g. A 282.1×275.1 and
+         J 151.8×249.2. drawImage stretches each PNG to fill its box, so the drawn proportions are
+         the box's, not the PNG's. They are not normalised to a common size: J really is drawn
+         narrower than C, and fitting each image to its cell would hand participants a size cue the
+         original never had.
+
+         So each image gets the original box: width as `drawWidth / 300` of the cell's content box
+         (which plays the part of the 300px cell, so the geometry holds at any `cell_size`), and
+         `aspect-ratio` as `drawWidth / drawHeight`. A non-auto aspect-ratio overrides the PNG's own
+         proportions, stretching it as drawImage does. */
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell {
+        aspect-ratio: 1 / 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell-content {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell-content img {
+        height: auto;
+        max-width: none;
+        max-height: none;
+      }
+      /* width: drawWidth / 300; aspect-ratio: drawWidth / drawHeight (stimuli/objectSet.js) */
+      .jspsych-multiplayer-reference-game img[src$="tangram_A.png"] { width: 94.03%; aspect-ratio: 282.1 / 275.1; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_B.png"] { width: 78.40%; aspect-ratio: 235.2 / 224; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_C.png"] { width: 97.77%; aspect-ratio: 293.3 / 228.9; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_D.png"] { width: 63.00%; aspect-ratio: 189 / 271.6; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_E.png"] { width: 68.17%; aspect-ratio: 204.5 / 250; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_F.png"] { width: 87.27%; aspect-ratio: 261.8 / 219.8; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_G.png"] { width: 94.97%; aspect-ratio: 284.9 / 237.3; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_H.png"] { width: 58.33%; aspect-ratio: 175 / 273.7; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_I.png"] { width: 74.17%; aspect-ratio: 222.5 / 247; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_J.png"] { width: 50.60%; aspect-ratio: 151.8 / 249.2; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_K.png"] { width: 61.60%; aspect-ratio: 184.8 / 280; }
+      .jspsych-multiplayer-reference-game img[src$="tangram_L.png"] { width: 60.90%; aspect-ratio: 182.7 / 280.7; }
+
+      /* FEEDBACK COLOUR. The original highlights the feedback cell green whatever the outcome; the
+         score counter is the only thing that tells players whether they were right. The plugin
+         colours a missed choice red (director's view) and the revealed target amber (matcher's
+         view), so repaint both green. The director's amber cue during the round is left alone.
+         Doubled-up selectors outrank the plugin's own, later-injected stylesheet. */
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-wrong,
+      body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-target {
+        border-color: #2b8a3e;
+        box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35);
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-mark.is-wrong {
+        background: #2b8a3e;
+      }
+
+      /* "Partner is typing…" hint from the plugin's `typing_indicator`. The original has one too
+         (sharedUtils/clientBase.js sends `playerTyping` and shows "Other player is typing..."). */
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-typing-hint {
+        min-height: 1.2em;
+        margin-bottom: 0.3em;
+        font-size: 0.9em;
+        font-style: italic;
+        color: #555;
+        text-align: left;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-typing-hint[hidden] {
+        display: block;
+        visibility: hidden;
+      }
+    </style>
   </head>
 
   <body></body>
   <script>
     // ===============================================================================================
-    // REFERENCE GAME — replication of Hawkins, Frank & Goodman (2020), "Characterizing the Dynamics of
-    // Learning in Repeated Reference Games" (Cognitive Science 44, e12845); the "sequential" condition.
+    // REFERENCE GAME: replication of Hawkins, Frank & Goodman (2020), "Characterizing the Dynamics of
+    // Learning in Repeated Reference Games" (Cognitive Science 44, e12845), "sequential" condition.
+    // Audited against the original source: OSF osf.io/vzvmf → hawkrobe/tangrams,
+    // `experiments/tangrams_sequential` (the "cued" version).
     //
-    // Faithful design (from the paper + github.com/hawkrobe/tangrams):
-    //   • 12 tangrams (the canonical set, shared with Clark & Wilkes-Gibbs 1986), in a 6×2 grid,
-    //     independently scrambled per player each trial (can't point by position).
-    //   • SINGLE target per trial; the matcher clicks the one tangram they think the director means.
-    //   • 6 repetition blocks × 12 trials = 72 trials; each tangram is the target once per block.
-    //   • Director/matcher roles fixed for the whole game.
-    //   • "Cued" version: only the director sees which tangram is the target (reveal_target_to).
-    //   • Free text chat, UNRESTRICTED both ways (both may send, no count/length limit) — the paper's
-    //     exact channel, and what makes the reference-shortening effect possible.
-    //   • Full immediate feedback to both: the director sees the matcher's click, the matcher sees the
-    //     intended tangram.
+    // Matches the original:
+    //   • 2 players with fixed director and matcher roles; 12 tangrams in a 6×2 grid of square cells.
+    //   • One target per round; each tangram is the target once per block, in a fresh order each
+    //     block (game.core.js `getRandomizedConditions`).
+    //   • Each player's layout is reshuffled every round, and no tangram sits in the same cell for
+    //     both players (`notMatchingLocs` / `arraysDifferent`): `scramble_mode: "disjoint"`.
+    //   • Only the director sees the target. Chat is unrestricted in both directions, with a
+    //     per-round log and a typing indicator (sharedUtils/clientBase.js `playerTyping`).
     //   • The matcher cannot click until the director has sent a message that round
-    //     (require_message_before_response), so a referring expression exists on every trial and the
-    //     matcher can't blind-guess to rush through — verified in hawkrobe/tangrams game.client.js,
-    //     where the click handler is gated behind `if (globalGame.messageSent)`.
+    //     (game.client.js gates the click on `globalGame.messageSent`).
+    //   • Feedback is one green highlight per role: the director sees the matcher's choice, the
+    //     matcher sees the target (game.client.js 's.feedback'). No "Correct!" line; the running
+    //     score above the board is the only outcome signal. 3000ms of feedback before the next round.
+    //   • A round counter and running score shown throughout (`newRoundUpdate`).
     //
-    // Every parameter above was verified against the paper + hawkrobe/tangrams code. The one departure
-    // is not a design choice: `round_timeout` (60s) has no counterpart in the original, which ran
-    // untimed. It exists so a disconnected or absent partner cannot hang the trial forever. Rounds it
-    // ends are recorded as `ended_by: "timeout"` with a null assignment — filter on that when
-    // analysing, and raise it if piloting shows real trials running long.
+    // Differs from the original:
+    //   1. 3 blocks (36 rounds) instead of 6 (72). This is a paid pilot of the pipeline, not a full
+    //      replication; every saved row records `config_blocks`.
+    //   2. `round_timeout` (60s). The original ran untimed. The timeout ends a round when a player
+    //      stays connected but never acts; timed-out rounds have `ended_by: "timeout"`.
+    //   3. Gate semantics. The original sets `messageSent` on ANY chat message, including the
+    //      matcher's own, so a matcher could unlock their click by typing. The plugin counts only the
+    //      partner's message, which is the stricter reading and, judging by the source comment, the
+    //      intended one.
+    //   4. No comprehension quiz before the game.
     //
-    // Key replication DVs (logged per round): message_count / messages_sent (words-per-reference proxy),
-    // accuracy / correct, rt. Expected: descriptions shorten strongly across blocks; accuracy near
-    // ceiling by the final block.
+    // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
+    // correct, rt.
     // ===============================================================================================
 
     const MIN_PLAYERS = 2;
-    // Faithful is 6. Lower this (e.g. 1–2) for a quick two-tab smoke test, then restore to 6.
-    const BLOCKS = 6;
+
+    const CONFIG = {
+      PILOT_LABEL: "hawkins-three-block-paid-pilot",
+      BLOCKS: 3,
+      // Prolific completion codes, one per exit. An exit with no code tells the participant to
+      // message the researcher instead of submitting.
+      COMPLETION_CODES: {
+        complete: "",
+        partner_dropped: "", // partner left or went idle, or this participant's connection was lost
+        no_match: "", // never got a partner
+        inactive: "", // this participant went idle mid-game
+        reloaded: "", // this participant reloaded the page mid-session
+      },
+      PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
+      NO_MATCH_PAYMENT_USD: 1.25,
+      LOBBY_TIMEOUT_MS: 5 * 60000,
+      PAIRING_TIMEOUT_MS: 30000,
+      ROUND_TIMEOUT_MS: 60000,
+      // End the game once the same role lets this many rounds in a row time out.
+      IDLE_ROUNDS: 2,
+      // How long a partner can be disconnected before they count as gone (core default: 10s).
+      DROPOUT_TIMEOUT_MS: 30000,
+      // JATOS only: how long this participant's own connection can stay down before the game gives
+      // up on it. The adapter's default is to retry forever, which leaves a participant whose
+      // channel the server closed stuck on "reconnecting".
+      RECONNECT_GIVE_UP_MS: 60000,
+      // DataPipe (pipe.jspsych.org). Empty disables it. On JATOS the result data is saved to JATOS
+      // either way.
+      DATAPIPE_EXPERIMENT_ID: "",
+      SAVE_PER_ROUND: true,
+      SAVE_MAX_ATTEMPTS: 3,
+      SAVE_BASE_BACKOFF_MS: 500,
+      // How long a terminal screen waits for its final save before saying "still uploading".
+      SAVE_REDIRECT_BUDGET_MS: 3000,
+    };
+
+    const onJatos = typeof jatos !== "undefined" && typeof jatos.onLoad === "function";
 
     const jsPsych = initJsPsych();
-    const localAdapter = new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
-    // Seed the schedule from the SHARED SESSION ID, so each dyad gets its own trial order while the
-    // two partners still agree on it. A fixed seed would hand every dyad the identical order, which
-    // confounds item order with repetition block — the very axis this study measures.
-    //
-    // Read AFTER the adapter is constructed, deliberately: on the first tab there is no `?mp_session=`
-    // yet, and the LocalAdapter constructor is what generates one and writes it into the URL. The
-    // second tab arrives with it already in the pasted link, so both compute the same schedule.
-    // Swapping to the Firebase adapter: seed from whatever identifies the dyad there (e.g. the room
-    // id) — the requirement is only that both partners derive the same value.
-    const SEED = new URLSearchParams(location.search).get("mp_session") ?? "hawkins-sequential";
-    // 72 rounds: 6 blocks × 12, each tangram once per block. Deterministic given the seed, so both
-    // tabs agree without exchanging anything.
-    const SCHEDULE = Tangrams.sequentialSchedule(BLOCKS, SEED);
+    // Built after connecting, from the session's shared randomness (see start()).
+    let SCHEDULE = [];
 
-    // The 12 tangrams are real PNGs, and `rt` is a reported DV — without this the first exposure to
-    // each image loads mid-trial. `stimuli` is an OBJECT parameter, so jsPsych's automatic media
-    // preloading cannot discover the `src` values; they have to be listed explicitly.
+    // Identity, captured once connected. Read from these rather than jsPsych.multiplayer after the
+    // terminal screen disconnects, when participantId and sessionId become null.
+    let participantId = null;
+    let dyadId = null;
+
+    // Prolific appends its IDs to the study link. On JATOS that link is the JATOS study link, and
+    // the component page does not carry its query string; jatos.js keeps it instead.
+    function studyLinkParams() {
+      return onJatos
+        ? new URLSearchParams(jatos.urlQueryParameters ?? {})
+        : new URLSearchParams(location.search);
+    }
+
+    let prolific = { pid: null, study: null, session: null };
+
+    jsPsych.data.addProperties({
+      experiment_file: "reference-game-hawkins.html",
+      study_variant: CONFIG.PILOT_LABEL,
+      deployment: onJatos ? "jatos" : "local",
+      config_blocks: CONFIG.BLOCKS,
+      config_n_stimuli: SHAPES.length,
+      config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
+      viewport_w: window.innerWidth,
+      viewport_h: window.innerHeight,
+      screen_w: window.screen?.width ?? null,
+      screen_h: window.screen?.height ?? null,
+      user_agent: navigator.userAgent,
+    });
+
+    (function warnOnUnsetConfig() {
+      const unset = Object.entries(CONFIG.COMPLETION_CODES)
+        .filter(([, v]) => !v)
+        .map(([k]) => k);
+      if (unset.length) console.warn(`Unset Prolific completion code(s): ${unset.join(", ")}`);
+      if (!CONFIG.DATAPIPE_EXPERIMENT_ID) console.warn("DataPipe experiment ID is unset.");
+    })();
+
+    // ---- Session state --------------------------------------------------------------------------
+
+    let myRole = null;
+    let partnerId = null;
+    let reloaded = false;
+    let noMatchReason = null;
+    let interruption = null; // "partner_left" | "connection_lost" | "inactive_self" | "inactive_partner"
+    let interruptedAtRound = null;
+    let outcome = null;
+
+    const idleTracker = Hawkins.createIdleTracker(CONFIG.IDLE_ROUNDS);
+
+    const completedRounds = () =>
+      jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", ended_by: "submit" });
+
+    function recordOutcome(exit) {
+      if (outcome) return;
+      const completed = completedRounds().count();
+      outcome = {
+        ended_reason: exit,
+        no_match_reason: noMatchReason,
+        interrupted_at_round: interruptedAtRound,
+        n_trials_completed: completed,
+        n_trials_scheduled: SCHEDULE.length,
+        blocks_completed: Math.floor(completed / SHAPES.length),
+      };
+      jsPsych.data.addProperties(outcome);
+    }
+
+    // ---- Saving ---------------------------------------------------------------------------------
+
+    const Pipeline = Hawkins.createPipeline({
+      experimentId: CONFIG.DATAPIPE_EXPERIMENT_ID,
+      getRows: () => jsPsych.data.get().values(),
+      meta: () => ({
+        dyad_id: dyadId,
+        participant_id: participantId,
+        prolific_pid: prolific.pid,
+        outcome,
+      }),
+      maxAttempts: CONFIG.SAVE_MAX_ATTEMPTS,
+      baseBackoffMs: CONFIG.SAVE_BASE_BACKOFF_MS,
+    });
+
+    const JatosSink = onJatos
+      ? Hawkins.createJatosSink(jatos, () => jsPsych.data.get().json())
+      : null;
+
+    function saveProgress(label) {
+      JatosSink?.submit();
+      Pipeline.save(label);
+    }
+
+    async function finalSave(label) {
+      const results = await Promise.all([
+        JatosSink ? JatosSink.submit() : { skipped: true },
+        Pipeline.flush(label, CONFIG.SAVE_REDIRECT_BUDGET_MS),
+      ]);
+      return Hawkins.combineSaveResults(results);
+    }
+
+    // ---- Prolific -------------------------------------------------------------------------------
+
+    const money = (usd) => `$${usd.toFixed(2)}`;
+
+    function submissionBlockHTML(codeKey) {
+      const code = CONFIG.COMPLETION_CODES[codeKey];
+      if (!code) {
+        return `<p style="color:#b00"><strong>Something has gone wrong on our end.</strong> Your
+                responses have been recorded, but the completion code for this exit
+                (<code>${codeKey}</code>) is missing, so the automatic submission cannot run.</p>
+                <p style="color:#b00">Please <strong>message the researcher from this study's page on
+                Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>. You will be
+                paid, so do not return the study. Please keep this tab open until you have sent it.</p>`;
+      }
+      return `<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
+              <p style="font-size:0.9em">If that button does not work, your completion code is
+              <code style="user-select:all">${code}</code>. Paste it into Prolific to submit.</p>`;
+    }
+
+    function submitToProlific(codeKey, successful) {
+      const code = CONFIG.COMPLETION_CODES[codeKey];
+      if (!code) return;
+      const url = `${CONFIG.PROLIFIC_SUBMIT_URL}?cc=${encodeURIComponent(code)}`;
+      if (onJatos) {
+        // Finishes the JATOS study result, with the final data, before leaving for Prolific.
+        jatos.endStudyAndRedirect(url, jsPsych.data.get().json(), successful);
+      } else {
+        window.location.href = url;
+      }
+    }
+
+    // ---- Timeline -------------------------------------------------------------------------------
+
+    // The 12 tangrams are real PNGs, and rt is a DV. `stimuli` is an object parameter, so jsPsych's
+    // automatic preloading cannot find the `src` values; list them here. Runs before the waiting
+    // room, so nobody is still loading images while their partner waits.
     const preloadTrial = {
       type: jsPsychPreload,
       images: SHAPES.map((s) => s.src),
       message: "<p>Loading…</p>",
     };
 
-    let myName = "";
-    let myRole;
-    let partnerId;
+    const connectedCount = (presence) =>
+      Object.values(presence).filter((status) => status === "connected").length;
 
-    const nameTrial = {
-      type: jsPsychSurveyText,
-      questions: [{ prompt: "Choose a display name:", required: true, name: "name" }],
-      on_finish: (data) => {
-        myName = (data.response.name || "").trim() || "Anonymous";
+    // Holds the participant until they have a partner.
+    //   JATOS: JATOS fills groups up to the batch's Max active members (which must be 2) and the
+    //          adapter seals the group when it is full, so waitForGroup() resolves with the final
+    //          roster. Nobody can join a sealed group, so a late arrival starts a new one.
+    //   Local: one link per dyad (`?mp_session=`), and a local group is never sealed, so wait until
+    //          two tabs are connected. Open exactly two tabs per session.
+    let lobbyTicker = null;
+    const waitingRoom = {
+      type: jsPsychCallFunction,
+      async: true,
+      func: (done) => {
+        const deadline = Date.now() + CONFIG.LOBBY_TIMEOUT_MS;
+        jsPsych.getDisplayElement().innerHTML = `
+          <p>Waiting for a partner to join…</p>
+          <p>This study is played in pairs, so we need to match you with someone before we can
+             start. Most people are matched quickly.</p>
+          <p><strong>Time remaining: <span id="lobby-remaining">—</span></strong></p>
+          <p style="font-size:0.9em;color:#555">If we cannot find you a partner in time, we will end
+             the study and <strong>still pay you ${money(CONFIG.NO_MATCH_PAYMENT_USD)}</strong> for
+             waiting. You do not need to do anything.</p>
+          ${onJatos ? "" : `<p style="font-size:0.85em;color:#888">Testing locally? Open this page in
+             one other tab, keeping the <code>?mp_session=</code> in the URL.</p>`}`;
+        const el = document.getElementById("lobby-remaining");
+        const tick = () => {
+          const left = Math.max(0, deadline - Date.now());
+          const m = Math.floor(left / 60000);
+          const s = Math.floor((left % 60000) / 1000);
+          el.textContent = left < 1000 ? "finishing up…" : `${m}:${String(s).padStart(2, "0")}`;
+        };
+        tick();
+        lobbyTicker = setInterval(tick, 1000);
+        const finish = (data) => {
+          clearInterval(lobbyTicker);
+          done(data);
+        };
+
+        if (onJatos && jsPsych.multiplayer.group().size !== MIN_PLAYERS) {
+          // Without a limit of 2, JATOS puts everyone in one group and it never seals.
+          console.error(
+            `The JATOS batch's "Max active members" must be ${MIN_PLAYERS}; it is ` +
+              `${jsPsych.multiplayer.group().size}.`,
+          );
+          noMatchReason = "batch_misconfigured";
+          finish({ waiting_room: noMatchReason });
+          return;
+        }
+
+        const matched = onJatos
+          ? jsPsych.multiplayer.waitForGroup({ timeout: CONFIG.LOBBY_TIMEOUT_MS })
+          : jsPsych.multiplayer.wait((data, presence) => connectedCount(presence) >= MIN_PLAYERS, {
+              timeout: CONFIG.LOBBY_TIMEOUT_MS,
+            });
+        matched.then(
+          () =>
+            finish({
+              waiting_room: "matched",
+              group_members: jsPsych.multiplayer.group().members,
+              waited_ms: CONFIG.LOBBY_TIMEOUT_MS - (deadline - Date.now()),
+            }),
+          (error) => {
+            noMatchReason = error?.name === "MultiplayerTimeoutError" ? "lobby_timeout" : "lobby_error";
+            if (noMatchReason === "lobby_error") console.error("Waiting room failed", error);
+            finish({ waiting_room: noMatchReason, waiting_room_error: error?.name ?? String(error) });
+          },
+        );
       },
     };
 
-    const lobbyTrial = {
-      type: jsPsychMultiplayerSync,
-      push_data: () => ({ name: myName, joinedAt: Date.now() }),
-      message: `<p>Waiting for ${MIN_PLAYERS} players to join…</p>
-                <p>Open this page in another tab (keep the <code>?mp_session=</code> in the URL) to add a player.</p>`,
-      wait_for: (group) =>
-        Object.values(group).filter((entry) => entry && entry.name).length >= MIN_PLAYERS,
-    };
-
-    // Fixed director/matcher for the whole game, assigned by deterministic consensus (shared seed from
-    // the sorted participant ids) — not "whoever joined first". Use "join_order" while testing if you
-    // want the first tab to always be the director.
+    // Fixed director/matcher for the whole game, drawn from the session's shared randomness, so
+    // both players compute the same assignment without a coordinator. On JATOS `group_size: null`
+    // means the sealed group; locally it must be stated.
     const roleTrial = {
       type: jsPsychMultiplayerRole,
       roles: ["director", "matcher"],
       strategy: "random",
-      overflow_role: "spectator",
-      ready: (group) =>
-        Object.keys(group).length >= MIN_PLAYERS &&
-        Object.values(group).every((entry) => entry && entry.joinedAt != null),
+      group_size: onJatos ? null : MIN_PLAYERS,
+      timeout: CONFIG.PAIRING_TIMEOUT_MS,
       save_group: true,
       message: "<p>Pairing you with your partner…</p>",
-      on_finish: () => {
+      on_finish: (data) => {
         myRole = jsPsychMultiplayerRole.getMyRole();
         const byRole = jsPsychMultiplayerRole.participantsByRole();
         partnerId = myRole === "director" ? byRole.matcher?.[0] : byRole.director?.[0];
+        if (data.partner_left) noMatchReason = "partner_left_before_start";
+        else if (myRole !== "director" && myRole !== "matcher") noMatchReason = "pairing_timeout";
+        else document.body.dataset.role = myRole;
       },
     };
 
-    const spectatorScreen = {
-      timeline: [
-        {
-          type: jsPsychHtmlKeyboardResponse,
-          stimulus: "<p>This game is already full. Thanks for your interest!</p>",
-          choices: "NO_KEYS",
-          trial_duration: 4000,
-          on_finish: () => jsPsych.multiplayer.disconnect(),
-        },
-      ],
-      conditional_function: () => myRole === "spectator",
+    const pairingPhase = {
+      timeline: [roleTrial],
+      conditional_function: () => !noMatchReason,
     };
 
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
       columns: 6, // 6×2 grid, as in the original
-      role: () => jsPsychMultiplayerRole.getMyRole(),
+      cell_size: 130, // square cells, like the original's 300px ones (see the <style> block)
+      role: () => myRole,
       partner_id: () => partnerId,
       round: jsPsych.timelineVariable("round"),
-      targets: jsPsych.timelineVariable("targets"), // length 1 → single click (sequential)
-      scramble_mode: "independent",
-      reveal_target_to: "director", // "cued": only the director sees the target
-      // Unrestricted free chat, both directions — the paper's exact channel (these are the defaults,
-      // stated explicitly here because they are load-bearing for the effect).
+      targets: jsPsych.timelineVariable("targets"), // one target, one click
+      scramble_mode: "disjoint",
+      reveal_target_to: "director",
+      // Unrestricted chat both ways. These are the defaults, stated because the effect depends on them.
       chat_role: "both",
       max_messages: null,
       max_length: null,
-      // Exp. 2's click gate: no selection until the director has described the target this round.
-      // Guarantees a referring expression per trial and blocks blind-guessing.
       require_message_before_response: true,
-      show_running_score: true,
-      round_timeout: 60000, // NOT in the original — bounds the round if the partner leaves (see header)
+      typing_indicator: true, // plugin defaults (2500ms TTL, 800ms throttle) match the original
+      // The round counter and score are in `prompt`, shown throughout, as in the original.
+      show_running_score: false,
+      feedback_content: {
+        director: { reveal_target: false, show_score: false, show_partner_choice: true },
+        matcher: { reveal_target: true, show_score: false, show_partner_choice: false },
+      },
+      feedback_duration: 3000,
+      round_timeout: CONFIG.ROUND_TIMEOUT_MS,
+      // A partner who leaves ends the round with ended_by: "participant_left" (the default).
+      end_on_participant_left: true,
       save_interaction_history: true,
-      prompt: (role) =>
-        role === "director"
-          ? "<p><strong>You are the Director.</strong> Describe the highlighted tangram so your partner can pick it out.</p>"
-          : "<p><strong>You are the Matcher.</strong> Click the tangram your partner is describing.</p>",
+      // Instruction wording from the original (game.client.js `client_onjoingame`), with one fix:
+      // the original tells both roles they may "talk to the director", a copy-paste slip, so the
+      // director's copy names the matcher.
+      prompt: (role) => {
+        const finished = jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game" });
+        const score = finished.filter({ correct: true }).count();
+        // The original's round number advances on every round, whatever the outcome.
+        const roundNum = finished.count() + 1;
+        const header = `<p>Round ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}</p>`;
+        const director =
+          "Send messages to help the matcher pick the target image." +
+          " You are free to use the chatbox to talk to the matcher at any time.";
+        const matcher =
+          "Select the correct target out of the lineup." +
+          " You are free to use the chatbox to talk to the director at any time.";
+        return role === "director"
+          ? `${header}<p><strong>You are the Director.</strong> ${director}</p>`
+          : `${header}<p><strong>You are the Matcher.</strong> ${matcher}</p>`;
+      },
+      on_finish: (data) => {
+        if (CONFIG.SAVE_PER_ROUND) saveProgress(`round-${data.round}`);
+
+        if (data.partner_left) interruption = "partner_left";
+        else if (data.connection_lost) interruption = "connection_lost";
+        else {
+          const idle = idleTracker.record(data);
+          if (idle) interruption = idle === myRole ? "inactive_self" : "inactive_partner";
+        }
+        if (interruption) {
+          interruptedAtRound = data.round;
+          jsPsych.abortCurrentTimeline();
+        }
+      },
     };
 
     const gameLoop = {
       timeline: [gameRound],
-      timeline_variables: SCHEDULE,
-      conditional_function: () => myRole === "director" || myRole === "matcher",
+      timeline_variables: SCHEDULE, // replaced in start(), once the schedule exists
+      conditional_function: () => !noMatchReason,
     };
 
-    const doneTrial = {
+    // ---- Terminal screen ------------------------------------------------------------------------
+
+    function exitMessage(exit) {
+      const played = completedRounds().count();
+      const progress = `<p>You completed ${played} of ${SCHEDULE.length} rounds together${
+        played > 0 ? ", and that work is saved and still useful to us" : ""
+      }.</p>`;
+      switch (exit) {
+        case "reloaded":
+          return `<h2>This page was reloaded</h2>
+            <p>The game carried on without this page, so it can't be rejoined.
+               <strong>You will still be paid for the time you spent.</strong></p>`;
+        case "no_match":
+          return `<h2>We could not match you with a partner</h2>
+            ${
+              noMatchReason === "lobby_timeout"
+                ? `<p>We could not find you a partner in the time available. This happens when not
+                     enough people are online at the same moment. It is nothing to do with you.</p>`
+                : noMatchReason === "partner_left_before_start"
+                ? `<p>Your partner left before the game could start. It is nothing to do with you.</p>`
+                : `<p>Something went wrong on our end before the game could start. It is nothing to
+                     do with you.</p>`
+            }
+            <p><strong>You will still be paid ${money(CONFIG.NO_MATCH_PAYMENT_USD)} for your
+               time.</strong></p>`;
+        case "partner_left":
+        case "inactive_partner":
+          return `<h2>Your partner stopped responding</h2>
+            <p>${
+              exit === "partner_left"
+                ? "Your partner disconnected"
+                : "Your partner stopped taking part"
+            }, so we have ended the study here.
+               <strong>This is not your fault, and your payment is not affected.</strong></p>
+            ${progress}`;
+        case "connection_lost":
+          return `<h2>We lost the connection to the game</h2>
+            <p>Your connection to the game server dropped and did not come back, so we have ended
+               the study here. <strong>Your payment is not affected.</strong></p>
+            ${progress}`;
+        case "inactive_self":
+          return `<h2>The game has ended</h2>
+            <p>The last ${CONFIG.IDLE_ROUNDS} rounds ran out of time while it was your turn, so we
+               have ended the game.</p>
+            ${progress}`;
+        case "complete": {
+          const correct = completedRounds().filter({ correct: true }).count();
+          return `<h2>Game complete!</h2>
+            <p>Together you got <strong>${correct} of ${played}</strong> round${
+              played === 1 ? "" : "s"
+            } correct.</p>
+            <p>Thank you. Please submit to complete the study.</p>`;
+        }
+      }
+      throw new Error(`No message for exit "${exit}"`);
+    }
+
+    function showSaveStatus(result) {
+      const el = document.getElementById("save-status");
+      if (!el) return;
+      el.textContent = result.skipped
+        ? ""
+        : result.ok
+        ? "Your responses have been saved."
+        : result.timedOut
+        ? "Still uploading. You can submit now; this will finish in the background."
+        : "Your responses could not be uploaded. Please submit anyway and message the researcher.";
+    }
+
+    const terminalScreen = {
       type: jsPsychHtmlKeyboardResponse,
       stimulus: () => {
-        const completed = jsPsych.data
-          .get()
-          .filter({ trial_type: "multiplayer-reference-game", ended_by: "submit" });
-        const played = completed.count();
-        const correct = completed.filter({ correct: true }).count();
-        return `<h2>Game complete!</h2>
-                <p>Together you got <strong>${correct} of ${played}</strong> round${
-          played === 1 ? "" : "s"
-        } correct.</p>
-                <p>You may close this tab. <button id="dl">Download data (JSON)</button></p>`;
+        const { exit, codeKey } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
+        return `${exitMessage(exit)}
+          <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
+          ${submissionBlockHTML(codeKey)}
+          ${
+            onJatos
+              ? ""
+              : `<p style="font-size:0.85em;color:#666">Researcher tools:
+                   <button id="dl" type="button">Download data (JSON)</button></p>`
+          }`;
       },
       choices: "NO_KEYS",
       on_load: () => {
+        const { exit, codeKey } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
+        recordOutcome(exit);
+        // Leave the group, so a partner still waiting sees this participant as gone. There is no
+        // session to leave when connect() failed.
+        if (jsPsych.multiplayer.session) jsPsych.multiplayer.disconnect();
+        finalSave(`final-${exit}`).then(showSaveStatus);
+        document
+          .getElementById("prolific-submit")
+          ?.addEventListener("click", () => submitToProlific(codeKey, exit === "complete"));
         document
           .getElementById("dl")
           ?.addEventListener("click", () =>
-            jsPsych.data.get().localSave("json", "reference-game-hawkins-data.json")
+            jsPsych.data.get().localSave("json", "reference-game-hawkins-data.json"),
           );
       },
     };
 
-    jsPsych.multiplayer.connect(localAdapter).then(() => {
-      // Preload FIRST, before pairing: a participant who is still fetching images while their
-      // partner waits in the lobby wastes the partner's time.
-      jsPsych.run([
-        preloadTrial,
-        nameTrial,
-        lobbyTrial,
-        roleTrial,
-        spectatorScreen,
-        gameLoop,
-        doneTrial,
-      ]);
-    });
+    // ---- Start ----------------------------------------------------------------------------------
+
+    function adapter() {
+      return onJatos
+        ? new jsPsychAdapterMultiplayerJatos({ closeAfterReconnectingMs: CONFIG.RECONNECT_GIVE_UP_MS })
+        : // persistParticipant keeps a reloaded tab's ID, so the reload is detected as a restart
+          // (previousInstance) instead of the tab joining as a third participant.
+          new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
+    }
+
+    async function start() {
+      const params = studyLinkParams();
+      prolific = {
+        pid: params.get("PROLIFIC_PID"),
+        study: params.get("STUDY_ID"),
+        session: params.get("SESSION_ID"),
+      };
+      jsPsych.data.addProperties({
+        prolific_pid: prolific.pid,
+        study_id: prolific.study,
+        session_id: prolific.session,
+      });
+
+      try {
+        await jsPsych.multiplayer.connect(adapter(), { dropoutTimeout: CONFIG.DROPOUT_TIMEOUT_MS });
+      } catch (error) {
+        console.error("Could not connect to the multiplayer session", error);
+        noMatchReason = "connect_error";
+        await jsPsych.run([terminalScreen]);
+        return;
+      }
+
+      participantId = jsPsych.multiplayer.participantId;
+      dyadId = jsPsych.multiplayer.sessionId;
+      jsPsych.data.addProperties({ participant_id: participantId, dyad_id: dyadId });
+
+      if (jsPsych.multiplayer.previousInstance) {
+        reloaded = true;
+        await jsPsych.run([terminalScreen]);
+        return;
+      }
+
+      SCHEDULE = Hawkins.sequentialSchedule(
+        CONFIG.BLOCKS,
+        SHAPES.map((s) => s.id),
+        (key, array) => jsPsych.multiplayer.shuffle(key, array),
+      );
+      gameLoop.timeline_variables = SCHEDULE;
+      jsPsych.data.addProperties({ config_trials: SCHEDULE.length });
+
+      await jsPsych.run([preloadTrial, waitingRoom, pairingPhase, gameLoop, terminalScreen]);
+    }
+
+    if (onJatos) jatos.onLoad(start);
+    else start();
   </script>
 </html>

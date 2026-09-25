@@ -1,0 +1,6 @@
+# Built and downloaded dependencies. Fill with `npm run vendor`; not committed, because this repo
+# has twice reverted committing built bundles. vendor/manifest.json records the pinned versions.
+vendor/
+# JATOS study archives written by `npm run jzip`.
+*.jzip
+node_modules/
