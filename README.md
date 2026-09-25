@@ -39,7 +39,7 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 
 > **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) purely so
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
-> it ends are logged as `ended_by: "timeout"` with a null assignment, so they're easy to exclude.
+> it ends are logged as a timeout (`multiplayer_outcome: "timeout"` in the Hawkins build, `ended_by: "timeout"` in C&WG) with a null assignment, so they're easy to exclude.
 
 ## Current pilot direction
 

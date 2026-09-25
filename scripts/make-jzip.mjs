@@ -189,7 +189,7 @@ function buildJas() {
             uuid: crypto.randomUUID(),
             title: "Hawkins reference game",
             htmlFilePath: ENTRY_HTML,
-            // A reload must reach the page, which detects it (previousInstance) and shows the
+            // A reload must reach the page, which detects it (`restarted`) and shows the
             // participant a paid exit. With reloadable false, JATOS shows its own error instead.
             reloadable: true,
             active: true,

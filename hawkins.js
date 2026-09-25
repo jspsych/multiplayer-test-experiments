@@ -31,7 +31,7 @@
   // the director's messages, so both reach the same answer from their own round data. That is the
   // point: counting only "my partner was silent" makes the idle player blame the attentive one.
   function idleRole(data) {
-    if (data.ended_by !== "timeout") return null;
+    if (data.multiplayer_outcome !== "timeout") return null;
     const sent = data.messages_sent ?? 0;
     const received = (data.message_count ?? 0) - sent;
     const directorMessages = data.role === "director" ? sent : received;
@@ -62,7 +62,7 @@
   // ---- Exit routing ---------------------------------------------------------------------------
 
   // Every session ends on exactly one terminal screen. `state` is:
-  //   reloaded      true when this page load is a restart of an earlier one (previousInstance)
+  //   reloaded      true when this page load is a restart of an earlier one (restarted)
   //   noMatchReason set when the participant never got a partner (lobby, pairing, connect errors)
   //   interruption  set when a game in progress ended early: "partner_left", "connection_lost",
   //                 "inactive_self" or "inactive_partner"

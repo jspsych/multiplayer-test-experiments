@@ -125,7 +125,7 @@
     //   1. 3 blocks (36 rounds) instead of 6 (72). This is a paid pilot of the pipeline, not a full
     //      replication; every saved row records `config_blocks`.
     //   2. `round_timeout` (60s). The original ran untimed. The timeout ends a round when a player
-    //      stays connected but never acts; timed-out rounds have `ended_by: "timeout"`.
+    //      stays connected but never acts; timed-out rounds have `multiplayer_outcome: "timeout"`.
     //   3. Gate semantics. The original sets `messageSent` on ANY chat message, including the
     //      matcher's own, so a matcher could unlock their click by typing. The plugin counts only the
     //      partner's message, which is the stricter reading and, judging by the source comment, the
@@ -159,9 +159,9 @@
       IDLE_ROUNDS: 2,
       // How long a partner can be disconnected before they count as gone (core default: 10s).
       DROPOUT_TIMEOUT_MS: 30000,
-      // JATOS only: how long this participant's own connection can stay down before the game gives
-      // up on it. The adapter's default is to retry forever, which leaves a participant whose
-      // channel the server closed stuck on "reconnecting".
+      // How long this participant's own connection can stay down before the session gives up on it
+      // and the round ends with "connection_lost". The core's default is to retry forever, which
+      // leaves a JATOS participant whose channel the server closed stuck on "reconnecting".
       RECONNECT_GIVE_UP_MS: 60000,
       // DataPipe (pipe.jspsych.org). Empty disables it. On JATOS the result data is saved to JATOS
       // either way.
@@ -181,8 +181,8 @@
     // Built after connecting, from the session's shared randomness (see start()).
     let SCHEDULE = [];
 
-    // Identity, captured once connected. Read from these rather than jsPsych.multiplayer after the
-    // terminal screen disconnects, when participantId and sessionId become null.
+    // Identity, captured once connected, for the DataPipe envelope. Every jsPsych row recorded while
+    // connected also gets them, as multiplayer_participant_id and multiplayer_session_id.
     let participantId = null;
     let dyadId = null;
 
@@ -231,7 +231,7 @@
     const idleTracker = Hawkins.createIdleTracker(CONFIG.IDLE_ROUNDS);
 
     const completedRounds = () =>
-      jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", ended_by: "submit" });
+      jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", multiplayer_outcome: "completed" });
 
     function recordOutcome(exit) {
       if (outcome) return;
@@ -384,9 +384,10 @@
               waited_ms: CONFIG.LOBBY_TIMEOUT_MS - (deadline - Date.now()),
             }),
           (error) => {
-            noMatchReason = error?.name === "MultiplayerTimeoutError" ? "lobby_timeout" : "lobby_error";
-            if (noMatchReason === "lobby_error") console.error("Waiting room failed", error);
-            finish({ waiting_room: noMatchReason, waiting_room_error: error?.name ?? String(error) });
+            const timedOut = error?.name === "MultiplayerError" && error.code === "timeout";
+            noMatchReason = timedOut ? "lobby_timeout" : "lobby_error";
+            if (!timedOut) console.error("Waiting room failed", error);
+            finish({ waiting_room: noMatchReason, waiting_room_error: error?.code ?? String(error) });
           },
         );
       },
@@ -407,7 +408,7 @@
         myRole = jsPsychMultiplayerRole.getMyRole();
         const byRole = jsPsychMultiplayerRole.participantsByRole();
         partnerId = myRole === "director" ? byRole.matcher?.[0] : byRole.director?.[0];
-        if (data.partner_left) noMatchReason = "partner_left_before_start";
+        if (data.multiplayer_outcome === "participant_left") noMatchReason = "partner_left_before_start";
         else if (myRole !== "director" && myRole !== "matcher") noMatchReason = "pairing_timeout";
         else document.body.dataset.role = myRole;
       },
@@ -443,7 +444,7 @@
       },
       feedback_duration: 3000,
       round_timeout: CONFIG.ROUND_TIMEOUT_MS,
-      // A partner who leaves ends the round with ended_by: "participant_left" (the default).
+      // A partner who leaves ends the round with multiplayer_outcome: "participant_left".
       end_on_participant_left: true,
       save_interaction_history: true,
       // Instruction wording from the original (game.client.js `client_onjoingame`), with one fix:
@@ -468,8 +469,8 @@
       on_finish: (data) => {
         if (CONFIG.SAVE_PER_ROUND) saveProgress(`round-${data.round}`);
 
-        if (data.partner_left) interruption = "partner_left";
-        else if (data.connection_lost) interruption = "connection_lost";
+        if (data.multiplayer_outcome === "participant_left") interruption = "partner_left";
+        else if (data.multiplayer_outcome === "connection_lost") interruption = "connection_lost";
         else {
           const idle = idleTracker.record(data);
           if (idle) interruption = idle === myRole ? "inactive_self" : "inactive_partner";
@@ -576,7 +577,7 @@
         recordOutcome(exit);
         // Leave the group, so a partner still waiting sees this participant as gone. There is no
         // session to leave when connect() failed.
-        if (jsPsych.multiplayer.session) jsPsych.multiplayer.disconnect();
+        if (jsPsych.multiplayer.status) jsPsych.multiplayer.disconnect();
         finalSave(`final-${exit}`).then(showSaveStatus);
         document
           .getElementById("prolific-submit")
@@ -593,10 +594,10 @@
 
     function adapter() {
       return onJatos
-        ? new jsPsychAdapterMultiplayerJatos({ closeAfterReconnectingMs: CONFIG.RECONNECT_GIVE_UP_MS })
-        : // persistParticipant keeps a reloaded tab's ID, so the reload is detected as a restart
-          // (previousInstance) instead of the tab joining as a third participant.
-          new jsPsychAdapterMultiplayerLocal({ persistParticipant: true });
+        ? new jsPsychAdapterMultiplayerJatos()
+        : // Keeps a reloaded tab's participant ID (persistParticipant, on by default), so the reload
+          // is detected as a restart instead of the tab joining as a third participant.
+          new jsPsychAdapterMultiplayerLocal();
     }
 
     async function start() {
@@ -613,7 +614,10 @@
       });
 
       try {
-        await jsPsych.multiplayer.connect(adapter(), { dropoutTimeout: CONFIG.DROPOUT_TIMEOUT_MS });
+        await jsPsych.multiplayer.connect(adapter(), {
+          dropoutTimeout: CONFIG.DROPOUT_TIMEOUT_MS,
+          reconnectTimeout: CONFIG.RECONNECT_GIVE_UP_MS,
+        });
       } catch (error) {
         console.error("Could not connect to the multiplayer session", error);
         noMatchReason = "connect_error";
@@ -623,9 +627,8 @@
 
       participantId = jsPsych.multiplayer.participantId;
       dyadId = jsPsych.multiplayer.sessionId;
-      jsPsych.data.addProperties({ participant_id: participantId, dyad_id: dyadId });
 
-      if (jsPsych.multiplayer.previousInstance) {
+      if (jsPsych.multiplayer.restarted) {
         reloaded = true;
         await jsPsych.run([terminalScreen]);
         return;

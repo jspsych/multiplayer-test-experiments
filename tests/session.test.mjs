@@ -65,8 +65,8 @@ test("each block asks for its own shuffle key", () => {
 
 // One timed-out round, seen from each side. The director sent `d` messages, the matcher `m`.
 const timedOut = (d, m) => ({
-  director: { role: "director", ended_by: "timeout", messages_sent: d, message_count: d + m },
-  matcher: { role: "matcher", ended_by: "timeout", messages_sent: m, message_count: d + m },
+  director: { role: "director", multiplayer_outcome: "timeout", messages_sent: d, message_count: d + m },
+  matcher: { role: "matcher", multiplayer_outcome: "timeout", messages_sent: m, message_count: d + m },
 });
 
 test("both partners blame the same role for a timed-out round", () => {
@@ -83,8 +83,8 @@ test("both partners blame the same role for a timed-out round", () => {
 });
 
 test("rounds that did not time out are nobody's fault", () => {
-  for (const ended_by of ["submit", "participant_left", "connection_lost"]) {
-    assert.equal(idleRole({ role: "director", ended_by, messages_sent: 0, message_count: 0 }), null);
+  for (const multiplayer_outcome of ["completed", "participant_left", "connection_lost", "cancelled"]) {
+    assert.equal(idleRole({ role: "director", multiplayer_outcome, messages_sent: 0, message_count: 0 }), null);
   }
 });
 
@@ -97,7 +97,7 @@ test("the tracker fires once one role idles the limit in a row", () => {
 test("a completed round, or the other role idling, restarts the count", () => {
   const t = createIdleTracker(2);
   t.record(timedOut(0, 0).matcher); // director idle
-  assert.equal(t.record({ role: "matcher", ended_by: "submit" }), null);
+  assert.equal(t.record({ role: "matcher", multiplayer_outcome: "completed" }), null);
   assert.equal(t.record(timedOut(0, 0).matcher), null); // director idle, count 1 again
   assert.equal(t.record(timedOut(3, 0).matcher), null); // matcher idle, count 1
   assert.equal(t.record(timedOut(3, 0).matcher), "matcher");
@@ -106,7 +106,7 @@ test("a completed round, or the other role idling, restarts the count", () => {
 test("a slow but active pair never trips the tracker", () => {
   const t = createIdleTracker(2);
   for (let i = 0; i < 10; i++) {
-    assert.equal(t.record({ role: "director", ended_by: i % 2 ? "timeout" : "submit", messages_sent: 4, message_count: 6 }), null);
+    assert.equal(t.record({ role: "director", multiplayer_outcome: i % 2 ? "timeout" : "completed", messages_sent: 4, message_count: 6 }), null);
   }
 });
 
