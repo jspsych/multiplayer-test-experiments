@@ -20,11 +20,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// jspsych/jspsych-multiplayer main after #103 (rejoin), #105 (session IDs, shared randomness) and
-// #106 (group formation).
-const MULTIPLAYER_COMMIT = "0128c441cc7af36319ffbfdda587930951bb52c4";
+// jspsych/jspsych-multiplayer main after #107 (the 1.0 API: trial scopes, multiplayer_outcome,
+// MultiplayerError codes, `restarted`).
+const MULTIPLAYER_COMMIT = "f6b359e30b45cd1edf3a28cfcb7bafc665b818ef";
 // The jsPsych#3694 preview build that commit's examples and vendored core are pinned to.
-const JSPSYCH_PREVIEW = "5cb6b05bec8ca0e409145453220803b408cd7e50";
+const JSPSYCH_PREVIEW = "4df7fbb672806086c7e118e53aba2262f27edf68";
 const JSPSYCH_PLUGINS = {
   "plugin-html-keyboard-response": "2.2.0",
   "plugin-preload": "2.1.0",
