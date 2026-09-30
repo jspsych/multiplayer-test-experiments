@@ -164,6 +164,10 @@
       NO_MATCH_PAYMENT_USD: 1.25,
       LOBBY_TIMEOUT_MS: 5 * 60000,
       PAIRING_TIMEOUT_MS: 30000,
+      // How long to wait after the role recap for the partner to press Continue before giving up
+      // and routing to the no-match exit. Without this barrier the faster reader would start round
+      // 1 (and its 60s timer) alone while the partner is still reading, desyncing the two timelines.
+      READY_TIMEOUT_MS: 2 * 60000,
       ROUND_TIMEOUT_MS: 60000,
       // End the game once the same role lets this many rounds in a row time out.
       IDLE_ROUNDS: 2,
@@ -522,6 +526,50 @@
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
+    // Ready barrier: both partners enter the game together. Each side pushes a ready flag and polls
+    // until both are present, so nobody starts round 1 (and its 60s timer) while the partner is still
+    // reading. A plain poll rather than the multiplayer-sync plugin: core wait() rejects when a
+    // participant leaves, and that rejection has no handler inside a plugin trial, while here every
+    // outcome (matched, timed out) lands on exactly one terminal state. The copy stays neutral about
+    // who is at fault because a timeout can also mean our own connection dropped.
+    const readyBarrier = {
+      type: jsPsychCallFunction,
+      async: true,
+      func: (done) => {
+        const startedAt = Date.now();
+        jsPsych.getDisplayElement().innerHTML = `
+          <p>Waiting for your partner to be ready…</p>
+          <p style="font-size:0.9em;color:#555">The game starts for both of you as soon as everyone
+             has continued.</p>`;
+        // Best effort: if our own push fails (connection down), the timeout below still ends the wait.
+        Promise.resolve(jsPsych.multiplayer.push({ ready: true })).catch(() => {});
+        let finished = false;
+        const finish = (data) => {
+          if (finished) return;
+          finished = true;
+          clearInterval(ticker);
+          done(data);
+        };
+        const ticker = setInterval(() => {
+          let state = {};
+          try {
+            state = jsPsych.multiplayer.getAll() ?? {};
+          } catch {
+            // Unreadable state looks like an empty room: keep waiting for the timeout.
+          }
+          const ready = Object.values(state).filter((s) => s && s.ready === true).length;
+          if (ready >= MIN_PLAYERS) {
+            finish({ waiting_ready: "matched", ready_wait_ms: Date.now() - startedAt });
+          } else if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
+            noMatchReason = "partner_not_ready";
+            finish({ waiting_ready: noMatchReason, ready_wait_ms: Date.now() - startedAt });
+          }
+        }, 500);
+      },
+      conditional_function: () =>
+        (myRole === "director" || myRole === "matcher") && !noMatchReason,
+    };
+
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -615,6 +663,9 @@
                      enough people are online at the same moment. It is nothing to do with you.</p>`
                 : noMatchReason === "partner_left_before_start"
                 ? `<p>Your partner left before the game could start. It is nothing to do with you.</p>`
+                : noMatchReason === "partner_not_ready"
+                ? `<p>We couldn't start the game together. Your partner may have left or had connection
+                     trouble — either way, it is nothing to do with you.</p>`
                 : `<p>Something went wrong on our end before the game could start. It is nothing to
                      do with you.</p>`
             }
@@ -755,6 +806,7 @@
         waitingRoom,
         pairingPhase,
         roleRecap,
+        readyBarrier,
         gameLoop,
         terminalScreen,
       ]);
