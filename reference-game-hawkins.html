@@ -353,18 +353,22 @@
     const roundSeconds = Math.round(CONFIG.ROUND_TIMEOUT_MS / 1000);
     const generalInstructions = continueScreen(
       `<h2>How this study works</h2>
-       <p>This is a <strong>real-time, two-person</strong> task. You will be paired with one other
-          participant and play at the same time.</p>
-       <p>There are <strong>${totalRounds} rounds</strong> in total, in <strong>${CONFIG.BLOCKS} blocks of ${SHAPES.length}</strong> (there are no breaks, the game just continues).</p>
-       <p>One of you will be the <strong>Director</strong> and the other the <strong>Matcher</strong>.
-          Those roles are assigned at random and <strong>stay the same for the whole game</strong>
-          (they do not switch).</p>
-       <p>Both of you can use the <strong>chat box below the shapes</strong> throughout. Each round,
-          the Director <strong>must send at least one message</strong> before the Matcher can choose.</p>
-       <p>The target is outlined in <strong>yellow</strong>, but only on the Director's screen. After
-          each choice, a <strong>green</strong> outline marks the correct shape on the Matcher's screen,
-          and if they picked a different one, their click is marked in <strong>blue</strong>.</p>
-       <p>Each round has a <strong>${roundSeconds}-second time limit</strong>, which starts when the round appears. If time runs out, that round ends and you move on.</p>
+       <p>You'll be paired with another participant for a real-time task. One of you is the
+          <strong>Director</strong> and the other is the <strong>Matcher</strong> (assigned at
+          random, and fixed for the whole game).</p>
+       <p><strong>Goal:</strong> The Director sees one highlighted shape in a lineup of ${SHAPES.length}
+          abstract shapes (tangrams) and describes it in the chat. The Matcher, who can't see the
+          highlight, tries to click that shape.</p>
+       <p><strong>Each round:</strong></p>
+       <ul style="text-align: left; display: inline-block; margin: 0 auto;">
+         <li>The target is outlined in yellow, but only on the Director's screen.</li>
+         <li>Both of you can chat freely (chat box below the shapes), but the Director must send
+             at least one message before the Matcher can choose.</li>
+         <li>You have ${roundSeconds} seconds. If time runs out, you move on.</li>
+         <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
+             Matcher picked a different one, their pick is outlined in blue.</li>
+       </ul>
+       <p>There are ${totalRounds} rounds in ${CONFIG.BLOCKS} blocks of ${SHAPES.length}, with no breaks.</p>
        <p>Next you will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
     );
@@ -480,7 +484,10 @@
                  shape so your partner can pick it out of the lineup of ${SHAPES.length}.</p>
               <p>Use the <strong>chat box below the shapes</strong>. You <strong>must send at least one
                  message every round</strong> — your partner can't click until you do.</p>
-              <p>You will stay the <strong>Director for the whole game</strong> (${CONFIG.BLOCKS} blocks of ${SHAPES.length} rounds).
+              <p>After each choice you'll see your partner's pick outlined in green. Green on your
+                 screen marks their pick, not necessarily the right answer, so check the score at
+                 the top.</p>
+              <p>You will stay the <strong>Director for the whole game</strong>.
                  Roles do not switch.</p>`;
             const matcherCopy = `
               <h2>You are the Matcher</h2>
@@ -494,7 +501,7 @@
                  description is unclear.</p>
               <p>After you choose, a <strong>green</strong> outline marks the correct shape. If you picked
                  a different one, your click is marked in <strong>blue</strong>.</p>
-              <p>You will stay the <strong>Matcher for the whole game</strong> (${CONFIG.BLOCKS} blocks of ${SHAPES.length} rounds).
+              <p>You will stay the <strong>Matcher for the whole game</strong>.
                  Roles do not switch.</p>`;
             jsPsych.getDisplayElement().innerHTML = `
               <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
