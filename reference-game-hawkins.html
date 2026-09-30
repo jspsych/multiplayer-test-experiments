@@ -355,15 +355,16 @@
       `<h2>How this study works</h2>
        <p>This is a <strong>real-time, two-person</strong> task. You will be paired with one other
           participant and play at the same time.</p>
-       <p>There are <strong>${totalRounds} rounds</strong> in total, in <strong>${CONFIG.BLOCKS} blocks of ${SHAPES.length}</strong>.</p>
+       <p>There are <strong>${totalRounds} rounds</strong> in total, in <strong>${CONFIG.BLOCKS} blocks of ${SHAPES.length}</strong> (there are no breaks, the game just continues).</p>
        <p>One of you will be the <strong>Director</strong> and the other the <strong>Matcher</strong>.
           Those roles are assigned at random and <strong>stay the same for the whole game</strong>
           (they do not switch).</p>
-       <p>Both of you may use the <strong>chat</strong> throughout.</p>
-       <p>The Director's target is outlined in <strong>yellow</strong> during the round. After each
-          choice, on the Matcher's screen a <strong>green</strong> outline marks the correct shape,
-          and a <strong>blue</strong> outline marks the Matcher's own click.</p>
-       <p>Each round has a <strong>${roundSeconds}-second time limit</strong>, which starts when the round appears.</p>
+       <p>Both of you can use the <strong>chat box below the shapes</strong> throughout. Each round,
+          the Director <strong>must send at least one message</strong> before the Matcher can choose.</p>
+       <p>The target is outlined in <strong>yellow</strong>, but only on the Director's screen. After
+          each choice, a <strong>green</strong> outline marks the correct shape on the Matcher's screen,
+          and if they picked a different one, their click is marked in <strong>blue</strong>.</p>
+       <p>Each round has a <strong>${roundSeconds}-second time limit</strong>, which starts when the round appears. If time runs out, that round ends and you move on.</p>
        <p>Next you will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
     );
@@ -474,19 +475,25 @@
           func: (done) => {
             const directorCopy = `
               <h2>You are the Director</h2>
-              <p>Each round, one tangram (an abstract shape) is outlined in <strong>yellow</strong>.
-                 Describe that shape so your partner can pick it out of the lineup of ${SHAPES.length}.</p>
-              <p>You can use the <strong>chat</strong> throughout the round.</p>
+              <p>Each round, one tangram (an abstract shape) is outlined in <strong>yellow</strong> on
+                 your screen. <strong>Only you can see it</strong> — your partner can't. Describe that
+                 shape so your partner can pick it out of the lineup of ${SHAPES.length}.</p>
+              <p>Use the <strong>chat box below the shapes</strong>. You <strong>must send at least one
+                 message every round</strong> — your partner can't click until you do.</p>
               <p>You will stay the <strong>Director for the whole game</strong> (${CONFIG.BLOCKS} blocks of ${SHAPES.length} rounds).
                  Roles do not switch.</p>`;
             const matcherCopy = `
               <h2>You are the Matcher</h2>
-              <p>You will see the same ${SHAPES.length} tangrams (abstract shapes). Use the Director's description
-                 to <strong>click the one</strong> you think they mean.</p>
-              <p>You <strong>cannot click until the Director has sent at least one message</strong>
-                 that round. You can use the <strong>chat</strong> throughout.</p>
-              <p>After you choose, a <strong>green</strong> outline marks the correct shape, and a
-                 <strong>blue</strong> outline marks your click (when it is not the target).</p>
+              <p>You will see ${SHAPES.length} tangrams (abstract shapes). The Director sees one of them
+                 outlined in <strong>yellow</strong>, but that highlight appears <strong>only on their
+                 screen</strong>, so go by their description to <strong>click the one</strong> you think
+                 they mean.</p>
+              <p>If clicking does nothing at first, that's expected. The shapes unlock as soon as the
+                 Director sends a message (they must send at least one every round). You can use the
+                 <strong>chat box below the shapes</strong> throughout, including asking questions if a
+                 description is unclear.</p>
+              <p>After you choose, a <strong>green</strong> outline marks the correct shape. If you picked
+                 a different one, your click is marked in <strong>blue</strong>.</p>
               <p>You will stay the <strong>Matcher for the whole game</strong> (${CONFIG.BLOCKS} blocks of ${SHAPES.length} rounds).
                  Roles do not switch.</p>`;
             jsPsych.getDisplayElement().innerHTML = `
