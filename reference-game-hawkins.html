@@ -526,12 +526,12 @@
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
-    // Ready barrier: both partners enter the game together. Each side pushes a ready flag and polls
-    // until both are present, so nobody starts round 1 (and its 60s timer) while the partner is still
-    // reading. A plain poll rather than the multiplayer-sync plugin: core wait() rejects when a
-    // participant leaves, and that rejection has no handler inside a plugin trial, while here every
-    // outcome (matched, timed out) lands on exactly one terminal state. The copy stays neutral about
-    // who is at fault because a timeout can also mean our own connection dropped.
+    // Ready barrier: both partners enter the game together. Each side merges a ready flag and
+    // polls until both are present, so nobody starts round 1 (and its 60s timer) while the partner
+    // is still reading. A plain poll rather than the multiplayer-sync plugin: core wait() rejects
+    // when a participant leaves, and that rejection has no handler inside a plugin trial, while here
+    // every outcome (matched, timed out) lands on exactly one terminal state. The copy stays neutral
+    // about who is at fault because a timeout can also mean our own connection dropped.
     const readyBarrier = {
       type: jsPsychCallFunction,
       async: true,
@@ -541,8 +541,6 @@
           <p>Waiting for your partner to be ready…</p>
           <p style="font-size:0.9em;color:#555">The game starts for both of you as soon as everyone
              has continued.</p>`;
-        // Best effort: if our own push fails (connection down), the timeout below still ends the wait.
-        Promise.resolve(jsPsych.multiplayer.push({ ready: true })).catch(() => {});
         let finished = false;
         const finish = (data) => {
           if (finished) return;
@@ -553,11 +551,22 @@
         const ticker = setInterval(() => {
           let state = {};
           try {
-            state = jsPsych.multiplayer.getAll() ?? {};
+            state = jsPsych.multiplayer.getAll({ scope: "session" }) ?? {};
           } catch {
             // Unreadable state looks like an empty room: keep waiting for the timeout.
           }
-          const ready = Object.values(state).filter((s) => s && s.ready === true).length;
+          let presence = {};
+          try {
+            presence = jsPsych.multiplayer.presence() ?? {};
+          } catch {
+            // Unreadable presence: count every ready flag rather than stalling the barrier.
+          }
+          // Ignore ready flags from participants who have since left, so a stale flag can't start
+          // the game solo. An unreadable presence map counts everything (fail open toward starting).
+          const hasPresence = Object.keys(presence).length > 0;
+          const ready = Object.entries(state).filter(
+            ([id, s]) => s && s.ready === true && (!hasPresence || presence[id] !== "left"),
+          ).length;
           if (ready >= MIN_PLAYERS) {
             finish({ waiting_ready: "matched", ready_wait_ms: Date.now() - startedAt });
           } else if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
@@ -565,6 +574,16 @@
             finish({ waiting_ready: noMatchReason, ready_wait_ms: Date.now() - startedAt });
           }
         }, 500);
+        // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
+        // replace would wipe. Guarded both ways so a failed write can never skip the ticker above:
+        // the timeout still ends the wait.
+        try {
+          Promise.resolve(
+            jsPsych.multiplayer.update({ ready: true }, { scope: "session" }),
+          ).catch(() => {});
+        } catch {
+          // Synchronous failure (e.g. closed session): keep waiting for the timeout.
+        }
       },
       conditional_function: () =>
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
