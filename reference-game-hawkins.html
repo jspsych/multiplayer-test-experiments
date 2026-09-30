@@ -329,7 +329,7 @@
         async: true,
         func: (done) => {
           jsPsych.getDisplayElement().innerHTML = `
-            <div style="max-width: 40em; margin: 2em auto; text-align: left; line-height: 1.45;">
+            <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
               ${html}
               <p style="margin-top: 1.5em; text-align: center;">
                 <button type="button" id="continue-instructions">Continue</button>
@@ -474,7 +474,7 @@
               <p>You will stay the <strong>Matcher for the whole game</strong> (3 blocks of 12 rounds).
                  Roles do not switch.</p>`;
             jsPsych.getDisplayElement().innerHTML = `
-              <div style="max-width: 40em; margin: 2em auto; text-align: left; line-height: 1.45;">
+              <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
                 ${myRole === "director" ? directorCopy : matcherCopy}
                 <p style="margin-top: 1.5em; text-align: center;">
                   <button type="button" id="continue-instructions">Continue</button>
