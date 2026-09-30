@@ -67,18 +67,27 @@
       .jspsych-multiplayer-reference-game img[src$="tangram_K.png"] { width: 61.60%; aspect-ratio: 184.8 / 280; }
       .jspsych-multiplayer-reference-game img[src$="tangram_L.png"] { width: 60.90%; aspect-ratio: 182.7 / 280.7; }
 
-      /* FEEDBACK COLOUR. The original highlights the feedback cell green whatever the outcome; the
-         score counter is the only thing that tells players whether they were right. The plugin
-         colours a missed choice red (director's view) and the revealed target amber (matcher's
-         view), so repaint both green. The director's amber cue during the round is left alone.
-         Doubled-up selectors outrank the plugin's own, later-injected stylesheet. */
-      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-wrong,
-      body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-target {
+      /* FEEDBACK COLOUR. During the round, the director's target stays the plugin amber/yellow.
+         After a choice, the matcher sees the true target in green (`is-target`) and their own
+         click in blue when it is wrong (`is-wrong`). The director still sees the matcher's pick
+         in green either way, as in the original (score is the accuracy signal on that side). */
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-wrong {
         border-color: #2b8a3e;
         box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35);
       }
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-mark.is-wrong {
         background: #2b8a3e;
+      }
+      body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-target {
+        border-color: #2b8a3e;
+        box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35);
+      }
+      body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-wrong {
+        border-color: #1971c2;
+        box-shadow: 0 0 0 2px rgba(25, 113, 194, 0.35);
+      }
+      body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-mark.is-wrong {
+        background: #1971c2;
       }
 
       /* "Partner is typing…" hint from the plugin's `typing_indicator`. The original has one too
@@ -116,9 +125,9 @@
     //     per-round log and a typing indicator (sharedUtils/clientBase.js `playerTyping`).
     //   • The matcher cannot click until the director has sent a message that round
     //     (game.client.js gates the click on `globalGame.messageSent`).
-    //   • Feedback is one green highlight per role: the director sees the matcher's choice, the
-    //     matcher sees the target (game.client.js 's.feedback'). No "Correct!" line; the running
-    //     score above the board is the only outcome signal. 3000ms of feedback before the next round.
+    //   • Feedback: director sees the matcher's pick (green either way); matcher sees the true
+    //     target in green and, if they missed, their click in blue. The running score is the
+    //     accuracy signal. 3000ms of feedback before the next round.
     //   • A round counter and running score shown throughout (`newRoundUpdate`).
     //
     // Differs from the original:
@@ -130,7 +139,8 @@
     //      matcher's own, so a matcher could unlock their click by typing. The plugin counts only the
     //      partner's message, which is the stricter reading and, judging by the source comment, the
     //      intended one.
-    //   4. No comprehension quiz before the game.
+    //   4. Short general instructions before the lobby, and a role recap after pairing.
+    //      Still no comprehension quiz.
     //
     // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
     // correct, rt.
@@ -154,6 +164,10 @@
       NO_MATCH_PAYMENT_USD: 1.25,
       LOBBY_TIMEOUT_MS: 5 * 60000,
       PAIRING_TIMEOUT_MS: 30000,
+      // How long to wait after the role recap for the partner to press Continue before giving up
+      // and routing to the no-match exit. Without this barrier the faster reader would start round
+      // 1 (and its 60s timer) alone while the partner is still reading, desyncing the two timelines.
+      READY_TIMEOUT_MS: 2 * 60000,
       ROUND_TIMEOUT_MS: 60000,
       // End the game once the same role lets this many rounds in a row time out.
       IDLE_ROUNDS: 2,
@@ -321,6 +335,48 @@
       message: "<p>Loading…</p>",
     };
 
+    // One Continue button; same pattern as the waiting room (no extra jsPsych plugin).
+    function continueScreen(html, data) {
+      return {
+        type: jsPsychCallFunction,
+        async: true,
+        func: (done) => {
+          jsPsych.getDisplayElement().innerHTML = `
+            <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
+              ${html}
+              <p style="margin-top: 1.5em; text-align: center;">
+                <button type="button" id="continue-instructions">Continue</button>
+              </p>
+            </div>`;
+          document.getElementById("continue-instructions").addEventListener("click", () => done(data));
+        },
+      };
+    }
+
+    const totalRounds = CONFIG.BLOCKS * SHAPES.length;
+    const roundSeconds = Math.round(CONFIG.ROUND_TIMEOUT_MS / 1000);
+    const generalInstructions = continueScreen(
+      `<h2>How this study works</h2>
+       <p>You'll be paired with another participant for a real-time task. One of you will be the
+          <strong>Director</strong> and the other will be the <strong>Matcher</strong> (assigned at
+          random, and fixed for the whole game).</p>
+       <p><strong>Goal:</strong> The Director sees one highlighted shape in a lineup of ${SHAPES.length}
+          abstract shapes (tangrams) and describes it in the chat. The Matcher, who can't see the
+          highlight, tries to click that shape.</p>
+       <p><strong>Each round:</strong></p>
+       <ul style="text-align: left; display: inline-block; margin: 0 auto;">
+         <li>The target is outlined in yellow, but only on the Director's screen.</li>
+         <li>Both of you can chat freely (chat box below the shapes), but the Director must send
+             at least one message before the Matcher can choose.</li>
+         <li>You have ${roundSeconds} seconds. If time runs out, you move on.</li>
+         <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
+             Matcher picked a different one, their pick is outlined in blue.</li>
+       </ul>
+       <p>There are ${totalRounds} rounds in ${CONFIG.BLOCKS} blocks of ${SHAPES.length}, with no breaks.</p>
+       <p>Next you will wait to be paired with a partner.</p>`,
+      { instruction_screen: "general" },
+    );
+
     const connectedCount = (presence) =>
       Object.values(presence).filter((status) => status === "connected").length;
 
@@ -419,6 +475,120 @@
       conditional_function: () => !noMatchReason,
     };
 
+    const roleRecap = {
+      timeline: [
+        {
+          type: jsPsychCallFunction,
+          async: true,
+          func: (done) => {
+            const directorCopy = `
+              <h2>You are the Director</h2>
+              <p>Each round, one tangram (an abstract shape) is outlined in <strong>yellow</strong> on
+                 your screen. <strong>Only you can see it</strong> — your partner can't. Describe that
+                 shape so your partner can pick it out of the lineup of ${SHAPES.length}.</p>
+              <p>Use the <strong>chat box below the shapes</strong>. You <strong>must send at least one
+                 message every round</strong> — your partner can't click until you do.</p>
+              <p>After each choice you'll see your partner's pick outlined in green. Green on your
+                 screen marks their pick, not necessarily the right answer, so check the score at
+                 the top.</p>
+              <p>You will stay the <strong>Director for the whole game</strong>.
+                 Roles do not switch.</p>`;
+            const matcherCopy = `
+              <h2>You are the Matcher</h2>
+              <p>You will see ${SHAPES.length} tangrams (abstract shapes). The Director sees one of them
+                 outlined in <strong>yellow</strong>, but that highlight appears <strong>only on their
+                 screen</strong>, so go by their description to <strong>click the one</strong> you think
+                 they mean.</p>
+              <p>If clicking does nothing at first, that's expected. The shapes unlock as soon as the
+                 Director sends a message (they must send at least one every round). You can use the
+                 <strong>chat box below the shapes</strong> throughout, including asking questions if a
+                 description is unclear.</p>
+              <p>After you choose, a <strong>green</strong> outline marks the correct shape. If you picked
+                 a different one, your click is marked in <strong>blue</strong>.</p>
+              <p>You will stay the <strong>Matcher for the whole game</strong>.
+                 Roles do not switch.</p>`;
+            jsPsych.getDisplayElement().innerHTML = `
+              <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
+                ${myRole === "director" ? directorCopy : matcherCopy}
+                <p style="margin-top: 1.5em; text-align: center;">
+                  <button type="button" id="continue-instructions">Continue</button>
+                </p>
+              </div>`;
+            document
+              .getElementById("continue-instructions")
+              .addEventListener("click", () =>
+                done({ instruction_screen: "role_recap", recap_role: myRole }),
+              );
+          },
+        },
+      ],
+      conditional_function: () =>
+        (myRole === "director" || myRole === "matcher") && !noMatchReason,
+    };
+
+    // Ready barrier: both partners enter the game together. Each side merges a ready flag and
+    // polls until both are present, so nobody starts round 1 (and its 60s timer) while the partner
+    // is still reading. A plain poll rather than the multiplayer-sync plugin: core wait() rejects
+    // when a participant leaves, and that rejection has no handler inside a plugin trial, while here
+    // every outcome (matched, timed out) lands on exactly one terminal state. The copy stays neutral
+    // about who is at fault because a timeout can also mean our own connection dropped.
+    const readyBarrier = {
+      type: jsPsychCallFunction,
+      async: true,
+      func: (done) => {
+        const startedAt = Date.now();
+        jsPsych.getDisplayElement().innerHTML = `
+          <p>Waiting for your partner to be ready…</p>
+          <p style="font-size:0.9em;color:#555">The game starts for both of you as soon as everyone
+             has continued.</p>`;
+        let finished = false;
+        const finish = (data) => {
+          if (finished) return;
+          finished = true;
+          clearInterval(ticker);
+          done(data);
+        };
+        const ticker = setInterval(() => {
+          let state = {};
+          try {
+            state = jsPsych.multiplayer.getAll({ scope: "session" }) ?? {};
+          } catch {
+            // Unreadable state looks like an empty room: keep waiting for the timeout.
+          }
+          let presence = {};
+          try {
+            presence = jsPsych.multiplayer.presence() ?? {};
+          } catch {
+            // Unreadable presence: count every ready flag rather than stalling the barrier.
+          }
+          // Ignore ready flags from participants who have since left, so a stale flag can't start
+          // the game solo. An unreadable presence map counts everything (fail open toward starting).
+          const hasPresence = Object.keys(presence).length > 0;
+          const ready = Object.entries(state).filter(
+            ([id, s]) => s && s.ready === true && (!hasPresence || presence[id] !== "left"),
+          ).length;
+          if (ready >= MIN_PLAYERS) {
+            finish({ waiting_ready: "matched", ready_wait_ms: Date.now() - startedAt });
+          } else if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
+            noMatchReason = "partner_not_ready";
+            finish({ waiting_ready: noMatchReason, ready_wait_ms: Date.now() - startedAt });
+          }
+        }, 500);
+        // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
+        // replace would wipe. Guarded both ways so a failed write can never skip the ticker above:
+        // the timeout still ends the wait.
+        try {
+          Promise.resolve(
+            jsPsych.multiplayer.update({ ready: true }, { scope: "session" }),
+          ).catch(() => {});
+        } catch {
+          // Synchronous failure (e.g. closed session): keep waiting for the timeout.
+        }
+      },
+      conditional_function: () =>
+        (myRole === "director" || myRole === "matcher") && !noMatchReason,
+    };
+
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -440,7 +610,7 @@
       show_running_score: false,
       feedback_content: {
         director: { reveal_target: false, show_score: false, show_partner_choice: true },
-        matcher: { reveal_target: true, show_score: false, show_partner_choice: false },
+        matcher: { reveal_target: true, show_score: false, show_partner_choice: true },
       },
       feedback_duration: 3000,
       round_timeout: CONFIG.ROUND_TIMEOUT_MS,
@@ -455,7 +625,11 @@
         const score = finished.filter({ correct: true }).count();
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
-        const header = `<p>Round ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}</p>`;
+        const blockNum = Math.min(
+          CONFIG.BLOCKS,
+          Math.floor(finished.count() / SHAPES.length) + 1,
+        );
+        const header = `<p>Block ${blockNum} of ${CONFIG.BLOCKS} — Round ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}</p>`;
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -508,6 +682,9 @@
                      enough people are online at the same moment. It is nothing to do with you.</p>`
                 : noMatchReason === "partner_left_before_start"
                 ? `<p>Your partner left before the game could start. It is nothing to do with you.</p>`
+                : noMatchReason === "partner_not_ready"
+                ? `<p>We couldn't start the game together. Your partner may have left or had connection
+                     trouble — either way, it is nothing to do with you.</p>`
                 : `<p>Something went wrong on our end before the game could start. It is nothing to
                      do with you.</p>`
             }
@@ -642,7 +819,16 @@
       gameLoop.timeline_variables = SCHEDULE;
       jsPsych.data.addProperties({ config_trials: SCHEDULE.length });
 
-      await jsPsych.run([preloadTrial, waitingRoom, pairingPhase, gameLoop, terminalScreen]);
+      await jsPsych.run([
+        preloadTrial,
+        generalInstructions,
+        waitingRoom,
+        pairingPhase,
+        roleRecap,
+        readyBarrier,
+        gameLoop,
+        terminalScreen,
+      ]);
     }
 
     if (onJatos) jatos.onLoad(start);
