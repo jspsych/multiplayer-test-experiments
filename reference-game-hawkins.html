@@ -349,6 +349,9 @@
           Those roles are assigned at random and <strong>stay the same for the whole game</strong>
           (they do not switch).</p>
        <p>Both of you may use the <strong>chat</strong> throughout.</p>
+       <p>The Director's target is outlined in <strong>yellow</strong> during the round. After each
+          choice, a <strong>green</strong> outline marks the result; <strong>Number correct</strong>
+          is what tells you whether it was right (green does not mean the matcher was correct).</p>
        <p>Each round has a <strong>60-second time limit</strong>, which starts when the round appears.</p>
        <p>Next you will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
@@ -460,8 +463,11 @@
           func: (done) => {
             const directorCopy = `
               <h2>You are the Director</h2>
-              <p>Each round, one tangram (an abstract shape) will be <strong>highlighted</strong> for
-                 you. Describe it so your partner can pick it out of the lineup of 12.</p>
+              <p>Each round, one tangram (an abstract shape) is outlined in <strong>yellow</strong>.
+                 Describe that shape so your partner can pick it out of the lineup of 12.</p>
+              <p>After the matcher clicks, their choice is outlined in <strong>green</strong>
+                 (whether they were right or wrong). Watch <strong>Number correct</strong> to see
+                 if they got it.</p>
               <p>You can use the <strong>chat</strong> throughout the round.</p>
               <p>You will stay the <strong>Director for the whole game</strong> (3 blocks of 12 rounds).
                  Roles do not switch.</p>`;
@@ -471,6 +477,9 @@
                  to <strong>click the one</strong> you think they mean.</p>
               <p>You <strong>cannot click until the Director has sent at least one message</strong>
                  that round. You can use the <strong>chat</strong> throughout.</p>
+              <p>After you choose, the true target is outlined in <strong>green</strong>. That outline
+                 is the answer key, not a “you were right” signal. <strong>Number correct</strong>
+                 goes up only when you picked the right shape.</p>
               <p>You will stay the <strong>Matcher for the whole game</strong> (3 blocks of 12 rounds).
                  Roles do not switch.</p>`;
             jsPsych.getDisplayElement().innerHTML = `
