@@ -349,11 +349,13 @@
       };
     }
 
+    const totalRounds = CONFIG.BLOCKS * SHAPES.length;
+    const roundSeconds = Math.round(CONFIG.ROUND_TIMEOUT_MS / 1000);
     const generalInstructions = continueScreen(
       `<h2>How this study works</h2>
        <p>This is a <strong>real-time, two-person</strong> task. You will be paired with one other
           participant and play at the same time.</p>
-       <p>There are <strong>36 rounds</strong> in total, in <strong>3 blocks of 12</strong>.</p>
+       <p>There are <strong>${totalRounds} rounds</strong> in total, in <strong>${CONFIG.BLOCKS} blocks of ${SHAPES.length}</strong>.</p>
        <p>One of you will be the <strong>Director</strong> and the other the <strong>Matcher</strong>.
           Those roles are assigned at random and <strong>stay the same for the whole game</strong>
           (they do not switch).</p>
@@ -361,7 +363,7 @@
        <p>The Director's target is outlined in <strong>yellow</strong> during the round. After each
           choice, on the Matcher's screen a <strong>green</strong> outline marks the correct shape,
           and a <strong>blue</strong> outline marks the Matcher's own click.</p>
-       <p>Each round has a <strong>60-second time limit</strong>, which starts when the round appears.</p>
+       <p>Each round has a <strong>${roundSeconds}-second time limit</strong>, which starts when the round appears.</p>
        <p>Next you will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
     );
@@ -473,19 +475,19 @@
             const directorCopy = `
               <h2>You are the Director</h2>
               <p>Each round, one tangram (an abstract shape) is outlined in <strong>yellow</strong>.
-                 Describe that shape so your partner can pick it out of the lineup of 12.</p>
+                 Describe that shape so your partner can pick it out of the lineup of ${SHAPES.length}.</p>
               <p>You can use the <strong>chat</strong> throughout the round.</p>
-              <p>You will stay the <strong>Director for the whole game</strong> (3 blocks of 12 rounds).
+              <p>You will stay the <strong>Director for the whole game</strong> (${CONFIG.BLOCKS} blocks of ${SHAPES.length} rounds).
                  Roles do not switch.</p>`;
             const matcherCopy = `
               <h2>You are the Matcher</h2>
-              <p>You will see the same 12 tangrams (abstract shapes). Use the Director's description
+              <p>You will see the same ${SHAPES.length} tangrams (abstract shapes). Use the Director's description
                  to <strong>click the one</strong> you think they mean.</p>
               <p>You <strong>cannot click until the Director has sent at least one message</strong>
                  that round. You can use the <strong>chat</strong> throughout.</p>
               <p>After you choose, a <strong>green</strong> outline marks the correct shape, and a
                  <strong>blue</strong> outline marks your click (when it is not the target).</p>
-              <p>You will stay the <strong>Matcher for the whole game</strong> (3 blocks of 12 rounds).
+              <p>You will stay the <strong>Matcher for the whole game</strong> (${CONFIG.BLOCKS} blocks of ${SHAPES.length} rounds).
                  Roles do not switch.</p>`;
             jsPsych.getDisplayElement().innerHTML = `
               <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
@@ -502,7 +504,8 @@
           },
         },
       ],
-      conditional_function: () => myRole === "director" || myRole === "matcher",
+      conditional_function: () =>
+        (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
     const gameRound = {
