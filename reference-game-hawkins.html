@@ -130,7 +130,8 @@
     //      matcher's own, so a matcher could unlock their click by typing. The plugin counts only the
     //      partner's message, which is the stricter reading and, judging by the source comment, the
     //      intended one.
-    //   4. No comprehension quiz before the game.
+    //   4. Short general instructions before the lobby, and a role recap after pairing.
+    //      Still no comprehension quiz.
     //
     // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
     // correct, rt.
@@ -321,6 +322,38 @@
       message: "<p>Loading…</p>",
     };
 
+    // One Continue button; same pattern as the waiting room (no extra jsPsych plugin).
+    function continueScreen(html, data) {
+      return {
+        type: jsPsychCallFunction,
+        async: true,
+        func: (done) => {
+          jsPsych.getDisplayElement().innerHTML = `
+            <div style="max-width: 40em; margin: 2em auto; text-align: left; line-height: 1.45;">
+              ${html}
+              <p style="margin-top: 1.5em; text-align: center;">
+                <button type="button" id="continue-instructions">Continue</button>
+              </p>
+            </div>`;
+          document.getElementById("continue-instructions").addEventListener("click", () => done(data));
+        },
+      };
+    }
+
+    const generalInstructions = continueScreen(
+      `<h2>How this study works</h2>
+       <p>This is a <strong>real-time, two-person</strong> task. You will be paired with one other
+          participant and play at the same time.</p>
+       <p>There are <strong>36 rounds</strong> in total, in <strong>3 blocks of 12</strong>.</p>
+       <p>One of you will be the <strong>Director</strong> and the other the <strong>Matcher</strong>.
+          Those roles are assigned at random and <strong>stay the same for the whole game</strong>
+          (they do not switch).</p>
+       <p>Both of you may use the <strong>chat</strong> throughout.</p>
+       <p>Each round has a <strong>60-second time limit</strong>, which starts when the round appears.</p>
+       <p>Next you will wait to be paired with a partner.</p>`,
+      { instruction_screen: "general" },
+    );
+
     const connectedCount = (presence) =>
       Object.values(presence).filter((status) => status === "connected").length;
 
@@ -419,6 +452,45 @@
       conditional_function: () => !noMatchReason,
     };
 
+    const roleRecap = {
+      timeline: [
+        {
+          type: jsPsychCallFunction,
+          async: true,
+          func: (done) => {
+            const directorCopy = `
+              <h2>You are the Director</h2>
+              <p>Each round, one tangram (an abstract shape) will be <strong>highlighted</strong> for
+                 you. Describe it so your partner can pick it out of the lineup of 12.</p>
+              <p>You can use the <strong>chat</strong> throughout the round.</p>
+              <p>You will stay the <strong>Director for the whole game</strong> (3 blocks of 12 rounds).
+                 Roles do not switch.</p>`;
+            const matcherCopy = `
+              <h2>You are the Matcher</h2>
+              <p>You will see the same 12 tangrams (abstract shapes). Use the Director's description
+                 to <strong>click the one</strong> you think they mean.</p>
+              <p>You <strong>cannot click until the Director has sent at least one message</strong>
+                 that round. You can use the <strong>chat</strong> throughout.</p>
+              <p>You will stay the <strong>Matcher for the whole game</strong> (3 blocks of 12 rounds).
+                 Roles do not switch.</p>`;
+            jsPsych.getDisplayElement().innerHTML = `
+              <div style="max-width: 40em; margin: 2em auto; text-align: left; line-height: 1.45;">
+                ${myRole === "director" ? directorCopy : matcherCopy}
+                <p style="margin-top: 1.5em; text-align: center;">
+                  <button type="button" id="continue-instructions">Continue</button>
+                </p>
+              </div>`;
+            document
+              .getElementById("continue-instructions")
+              .addEventListener("click", () =>
+                done({ instruction_screen: "role_recap", recap_role: myRole }),
+              );
+          },
+        },
+      ],
+      conditional_function: () => myRole === "director" || myRole === "matcher",
+    };
+
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -455,7 +527,11 @@
         const score = finished.filter({ correct: true }).count();
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
-        const header = `<p>Round ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}</p>`;
+        const blockNum = Math.min(
+          CONFIG.BLOCKS,
+          Math.floor(finished.count() / SHAPES.length) + 1,
+        );
+        const header = `<p>Block ${blockNum} of ${CONFIG.BLOCKS} — Round ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}</p>`;
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -642,7 +718,15 @@
       gameLoop.timeline_variables = SCHEDULE;
       jsPsych.data.addProperties({ config_trials: SCHEDULE.length });
 
-      await jsPsych.run([preloadTrial, waitingRoom, pairingPhase, gameLoop, terminalScreen]);
+      await jsPsych.run([
+        preloadTrial,
+        generalInstructions,
+        waitingRoom,
+        pairingPhase,
+        roleRecap,
+        gameLoop,
+        terminalScreen,
+      ]);
     }
 
     if (onJatos) jatos.onLoad(start);
