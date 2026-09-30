@@ -41,7 +41,11 @@ const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const VENDOR = path.join(REPO, "vendor");
 const checkout = path.resolve(process.argv[2] ?? path.join(REPO, "..", "jspsych-multiplayer"));
 
-const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: "inherit" });
+const run = (cmd, args, cwd) =>
+  // Without a shell, Node launches via CreateProcess, which only tries a bare name with ".exe"
+  // appended, so a bare "npm" never resolves npm.cmd/npm.ps1 on Windows. A shell fixes that
+  // (cmd.exe honours PATHEXT); Unix shells resolve "npm" either way.
+  execFileSync(cmd, args, { cwd, stdio: "inherit", shell: process.platform === "win32" });
 const sha256 = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
 async function download(url) {
