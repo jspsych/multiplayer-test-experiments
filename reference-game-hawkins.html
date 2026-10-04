@@ -132,8 +132,8 @@
     //   • A round counter and running score shown throughout (`newRoundUpdate`).
     //
     // Differs from the original:
-    //   1. 3 blocks (36 rounds) instead of 6 (72). This is a paid pilot of the pipeline, not a full
-    //      replication; every saved row records `config_blocks`.
+    //   1. 36 rounds instead of 72. Each tangram appears three times as a target in a balanced
+    //      schedule, but participants play one continuous sequence of trials.
     //   2. `round_timeout` (60s). The original ran untimed. The timeout ends a round when a player
     //      stays connected but never acts; timed-out rounds have `multiplayer_outcome: "timeout"`.
     //   3. Gate semantics. The original sets `messageSent` on ANY chat message, including the
@@ -150,16 +150,16 @@
     const MIN_PLAYERS = 2;
 
     const CONFIG = {
-      PILOT_LABEL: "hawkins-three-block-paid-pilot",
+      PILOT_LABEL: "hawkins-36-trial-paid-pilot",
       BLOCKS: 3,
-      // Prolific completion codes, one per exit. An exit with no code tells the participant to
-      // message the researcher instead of submitting.
+      // Replace these placeholders with real Prolific codes before the paid run. The placeholder
+      // is shown on the exit screen but cannot be submitted through the redirect button.
       COMPLETION_CODES: {
-        complete: "",
-        partner_dropped: "", // partner left or went idle, or this participant's connection was lost
-        no_match: "", // never got a partner
-        inactive: "", // this participant went idle mid-game
-        reloaded: "", // this participant reloaded the page mid-session
+        complete: "insertcodehere",
+        partner_dropped: "insertcodehere", // partner left or went idle, or connection was lost
+        no_match: "insertcodehere", // never got a partner
+        inactive: "insertcodehere", // this participant went idle mid-game
+        reloaded: "insertcodehere", // this participant reloaded the page mid-session
       },
       PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
       NO_MATCH_PAYMENT_USD: 1.25,
@@ -241,7 +241,7 @@
 
     (function warnOnUnsetConfig() {
       const unset = Object.entries(CONFIG.COMPLETION_CODES)
-        .filter(([, v]) => !v)
+        .filter(([, v]) => !v || v === "insertcodehere")
         .map(([k]) => k);
       if (unset.length) console.warn(`Unset Prolific completion code(s): ${unset.join(", ")}`);
       if (!CONFIG.DATAPIPE_EXPERIMENT_ID) console.warn("DataPipe experiment ID is unset.");
@@ -292,14 +292,8 @@
 
     function submissionBlockHTML(codeKey) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
-      if (!code) {
-        return `<p style="color:#b00"><strong>Something has gone wrong on our end.</strong> The
-                completion code for this exit
-                (<code>${codeKey}</code>) is missing, so the automatic submission cannot run.</p>
-                <p style="color:#b00">Please <strong>message the researcher from this study's page on
-                Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>. You will be
-                paid, so do not return the study. Please keep this tab open until you have sent it.</p>`;
-      }
+      if (!code || code === "insertcodehere")
+        return `<p>Completion code: <code style="user-select:all">insertcodehere</code></p>`;
       return `<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
               <p style="font-size:0.9em">If that button does not work, your completion code is
               <code style="user-select:all">${code}</code>. Paste it into Prolific to submit.</p>`;
@@ -307,7 +301,7 @@
 
     function submitToProlific(codeKey, successful) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
-      if (!code) return;
+      if (!code || code === "insertcodehere") return;
       const url = `${CONFIG.PROLIFIC_SUBMIT_URL}?cc=${encodeURIComponent(code)}`;
       if (onJatos) {
         // Finishes the JATOS study result, with the final data, before leaving for Prolific.
@@ -361,11 +355,12 @@
          <li>The target is outlined in yellow, but only on the Director's screen.</li>
          <li>Both of you can chat freely (chat box below the shapes), but the Director must send
              at least one message before the Matcher can choose.</li>
-         <li>You have ${roundSeconds} seconds. If time runs out, you move on.</li>
+         <li>You have ${roundSeconds} seconds to describe and pick a tangram. A countdown on every
+             trial shows the time remaining. If time runs out before the Matcher picks, you move on.</li>
          <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
              Matcher picked a different one, their pick is outlined in blue.</li>
        </ul>
-       <p>There are ${totalRounds} rounds in ${CONFIG.BLOCKS} blocks of ${SHAPES.length}, with no breaks.</p>
+       <p>There are ${totalRounds} trials, with no breaks.</p>
        <p>Next you will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
     );
@@ -582,6 +577,7 @@
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
+    let roundCountdownInterval = null;
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -618,11 +614,8 @@
         const score = finished.filter({ correct: true }).count();
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
-        const blockNum = Math.min(
-          CONFIG.BLOCKS,
-          Math.floor(finished.count() / SHAPES.length) + 1,
-        );
-        const header = `<p>Block ${blockNum} of ${CONFIG.BLOCKS} — Round ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}</p>`;
+        const header = `<p>Trial ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}
+          &nbsp;|&nbsp; Time remaining: <span id="round-remaining">${roundSeconds}s</span></p>`;
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -633,7 +626,27 @@
           ? `${header}<p><strong>You are the Director.</strong> ${director}</p>`
           : `${header}<p><strong>You are the Matcher.</strong> ${matcher}</p>`;
       },
+      on_load: () => {
+        // The plugin starts its wall-clock round timeout during synchronous trial setup, just
+        // before jsPsych calls on_load. Stop this display when feedback begins or the trial ends.
+        const remaining = document.getElementById("round-remaining");
+        const feedback = document.querySelector(".jspsych-multiplayer-reference-game-feedback");
+        const deadline = Date.now() + CONFIG.ROUND_TIMEOUT_MS;
+        const update = () => {
+          if (feedback?.textContent) {
+            remaining.textContent = "Selection complete";
+            clearInterval(countdownInterval);
+          } else {
+            remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
+          }
+        };
+        const countdownInterval = window.setInterval(update, 200);
+        update();
+        roundCountdownInterval = countdownInterval;
+      },
       on_finish: (data) => {
+        clearInterval(roundCountdownInterval);
+        roundCountdownInterval = null;
         if (CONFIG.JATOS_SAVE_PER_ROUND) saveProgress();
 
         if (data.multiplayer_outcome === "participant_left") interruption = "partner_left";
