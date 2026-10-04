@@ -293,8 +293,8 @@
     function submissionBlockHTML(codeKey) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
       if (!code) {
-        return `<p style="color:#b00"><strong>Something has gone wrong on our end.</strong> Your
-                responses have been recorded, but the completion code for this exit
+        return `<p style="color:#b00"><strong>Something has gone wrong on our end.</strong> The
+                completion code for this exit
                 (<code>${codeKey}</code>) is missing, so the automatic submission cannot run.</p>
                 <p style="color:#b00">Please <strong>message the researcher from this study's page on
                 Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>. You will be
@@ -659,9 +659,7 @@
 
     function exitMessage(exit) {
       const played = completedRounds().count();
-      const progress = `<p>You completed ${played} of ${SCHEDULE.length} rounds together${
-        played > 0 ? ", and that work is saved and still useful to us" : ""
-      }.</p>`;
+      const progress = `<p>You completed ${played} of ${SCHEDULE.length} rounds together.</p>`;
       switch (exit) {
         case "reloaded":
           return `<h2>This page was reloaded</h2>
