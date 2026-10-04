@@ -30,6 +30,7 @@ const JSPSYCH_PLUGINS = {
   "plugin-preload": "2.1.0",
   "plugin-call-function": "2.1.0",
 };
+const PIPE_EXTENSION_VERSION = "0.2.0";
 const MULTIPLAYER_PACKAGES = [
   "adapter-multiplayer-local",
   "adapter-multiplayer-jatos",
@@ -83,6 +84,10 @@ async function downloadJspsych() {
       file: `${pkg}.js`,
       url: `https://cdn.jsdelivr.net/npm/@jspsych/${pkg}@${version}/dist/index.browser.min.js`,
     })),
+    {
+      file: "extension-pipe.js",
+      url: `https://cdn.jsdelivr.net/npm/@jspsych/extension-pipe@${PIPE_EXTENSION_VERSION}/dist/index.browser.min.js`,
+    },
   ];
   return Promise.all(files.map(async (f) => ({ file: f.file, source: f.url, data: await download(f.url) })));
 }
@@ -103,6 +108,7 @@ const manifest = {
   multiplayer_commit: MULTIPLAYER_COMMIT,
   jspsych_preview: JSPSYCH_PREVIEW,
   jspsych_plugins: JSPSYCH_PLUGINS,
+  pipe_extension_version: PIPE_EXTENSION_VERSION,
   files: Object.fromEntries(files.map((f) => [f.file, { source: f.source, sha256: f.sha256 }])),
 };
 fs.writeFileSync(path.join(VENDOR, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

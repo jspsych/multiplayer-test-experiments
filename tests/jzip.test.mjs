@@ -6,9 +6,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
-const REPO = new URL("..", import.meta.url).pathname;
+const REPO = fileURLToPath(new URL("..", import.meta.url));
 const hasVendor = fs.existsSync(path.join(REPO, "vendor", "manifest.json"));
 
 // Reads a zip through its end record and central directory, as strict readers do.

@@ -12,7 +12,7 @@ live, version, and be piloted independently.
   Currently the paid-pilot build: 3 blocks × 12 tangrams = 36 trials, with Prolific exits, dropout
   handling and data saving. Runs on the local adapter or as a JATOS group study.
 - [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, idle detection, exit
-  routing, DataPipe and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
+  routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
 - [`scripts/vendor.mjs`](scripts/vendor.mjs) — fills the gitignored `vendor/` with every script the
   Hawkins page loads, at pinned versions. [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
   the page as a JATOS study archive.
@@ -62,7 +62,7 @@ should be ported to Hawkins rather than treating C&WG as the first launch target
 1. `npm run vendor`, with a [jspsych-multiplayer](https://github.com/jspsych/jspsych-multiplayer)
    checkout at `../jspsych-multiplayer` (or pass its path: `node scripts/vendor.mjs <path>`). This
    builds the multiplayer bundles at the commit pinned in `scripts/vendor.mjs` and downloads the
-   pinned jsPsych preview build and plugins into `vendor/`.
+   pinned jsPsych preview build, plugins, and DataPipe Pipe extension into `vendor/`.
 2. Serve the repo over http (e.g. `npx http-server .`) and open the page. It adds `?mp_session=…` to
    the URL.
 3. Open that full URL in exactly one other tab. The two tabs pair, and roles are drawn at random.
@@ -70,6 +70,22 @@ should be ported to Hawkins rather than treating C&WG as the first launch target
 `npm test` runs the tests. As a JATOS group study: `npm run jzip`, then import the `.jzip` with
 JATOS's **Import Study**. The batch's **Max active members** must be 2; JATOS then pairs arrivals
 from a single study link and the adapter seals each pair.
+
+### DataPipe setup for the Hawkins pilot
+
+Create a [DataPipe experiment](https://pipe.jspsych.org/getting-started) with Google Drive as its
+storage provider, then put the dashboard's 12-character experiment ID in
+`CONFIG.DATAPIPE_EXPERIMENT_ID` in `reference-game-hawkins.html`. Until that ID is set, the extension
+is disabled. Turn on **Accept new data** in the DataPipe dashboard and verify a completed test run in
+the linked Drive folder before a paid run. The extension stages each completed trial and submits one
+JSON file when the jsPsych timeline ends; an abandoned run can yield a `.partial.json` file. The
+filename is random and carries no participant identifier. Prolific, participant, and dyad IDs remain
+in the saved rows. JATOS result data is saved separately.
+
+Streaming means data leaves the browser during the session, and closing the tab may leave a partial
+file. Confirm that this matches the study consent and retention plan. DataPipe's staged-trial limit is
+16 KiB per trial; an oversized trial is omitted from a recovered partial file, although the final
+full-data submission can still include it. See [DataPipe's streaming limits](https://pipe.jspsych.org/docs/experiments/streaming).
 
 ### C&WG (`reference-game-cwg.html`)
 
@@ -83,6 +99,6 @@ gained session IDs, group formation and rejoin detection, so parts of it are out
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
 randomness, dropout and idle detection with paid exits, reload detection, Prolific IDs and
 completion routing, and saving to JATOS and/or DataPipe. Still open: completion codes and the
-DataPipe ID are unset in `CONFIG`, the build has not been run on a real JATOS server, and the
-multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit and a jsPsych
-preview build).
+DataPipe ID are unset in `CONFIG`, a Google Drive test upload and the real JATOS run are outstanding,
+and the multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit and a
+jsPsych preview build).
