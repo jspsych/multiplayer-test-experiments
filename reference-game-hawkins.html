@@ -525,7 +525,7 @@
     // when a participant leaves, and that rejection has no handler inside a plugin trial, while here
     // every outcome (matched, timed out) lands on exactly one terminal state. The copy stays neutral
     // about who is at fault because a timeout can also mean our own connection dropped.
-    const readyBarrier = {
+    const readyTrial = {
       type: jsPsychCallFunction,
       async: true,
       func: (done) => {
@@ -578,6 +578,12 @@
           // Synchronous failure (e.g. closed session): keep waiting for the timeout.
         }
       },
+    };
+
+    // jsPsych evaluates conditional_function on timeline nodes, not plugin trials.
+    // Skip readiness after failed pairing so its timeout cannot replace the original reason.
+    const readyBarrier = {
+      timeline: [readyTrial],
       conditional_function: () =>
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
