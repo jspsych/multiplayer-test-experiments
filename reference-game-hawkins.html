@@ -153,7 +153,7 @@
       PILOT_LABEL: "hawkins-36-trial-paid-pilot",
       BLOCKS: 3,
       // Replace these placeholders with real Prolific codes before the paid run. The placeholder
-      // is shown on the exit screen but cannot be submitted through the redirect button.
+      // allows testing the redirect, but is not a valid Prolific completion code.
       COMPLETION_CODES: {
         complete: "insertcodehere",
         partner_dropped: "insertcodehere", // partner left or went idle, or connection was lost
@@ -292,16 +292,18 @@
 
     function submissionBlockHTML(codeKey) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
-      if (!code || code === "insertcodehere")
-        return `<p>Completion code: <code style="user-select:all">insertcodehere</code></p>`;
-      return `<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
+      if (!code) return `<p>No completion code is configured. Please message the researcher.</p>`;
+      const testNotice = code === "insertcodehere"
+        ? `<p>This is a test completion code. The button tests the return to Prolific.</p>`
+        : "";
+      return `${testNotice}<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
               <p style="font-size:0.9em">If that button does not work, your completion code is
               <code style="user-select:all">${code}</code>. Paste it into Prolific to submit.</p>`;
     }
 
     function submitToProlific(codeKey, successful) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
-      if (!code || code === "insertcodehere") return;
+      if (!code) return;
       const url = `${CONFIG.PROLIFIC_SUBMIT_URL}?cc=${encodeURIComponent(code)}`;
       if (onJatos) {
         // Finishes the JATOS study result, with the final data, before leaving for Prolific.
