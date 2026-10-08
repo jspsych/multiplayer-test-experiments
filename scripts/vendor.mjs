@@ -41,7 +41,10 @@ const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const VENDOR = path.join(REPO, "vendor");
 const checkout = path.resolve(process.argv[2] ?? path.join(REPO, "..", "jspsych-multiplayer"));
 
-const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: "inherit" });
+const run = (cmd, args, cwd) =>
+  // Windows needs a shell to resolve npm.cmd; npm's arguments below are static.
+  // Launch Git directly so worktree paths containing spaces remain single arguments.
+  execFileSync(cmd, args, { cwd, stdio: "inherit", shell: process.platform === "win32" && cmd === "npm" });
 const sha256 = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
 async function download(url) {
