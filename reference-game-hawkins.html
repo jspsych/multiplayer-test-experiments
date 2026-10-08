@@ -140,7 +140,7 @@
     //      partner's message, which is the stricter reading and, judging by the source comment, the
     //      intended one.
     //   4. Short general instructions before the lobby, and a role recap after pairing.
-    //      Still no comprehension quiz.
+    //      A comprehension check repeats with corrective feedback before the lobby.
     //
     // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
     // correct, rt.
@@ -151,6 +151,7 @@
     const CONFIG = {
       PILOT_LABEL: "hawkins-three-block-paid-pilot",
       BLOCKS: 3,
+      COMPREHENSION_CHECK: true,
       // Prolific completion codes, one per exit. An exit with no code tells the participant to
       // message the researcher instead of submitting.
       COMPLETION_CODES: {
@@ -215,6 +216,7 @@
       study_variant: CONFIG.PILOT_LABEL,
       deployment: onJatos ? "jatos" : "local",
       config_blocks: CONFIG.BLOCKS,
+      config_comprehension_check: CONFIG.COMPREHENSION_CHECK,
       config_n_stimuli: SHAPES.length,
       config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
       viewport_w: window.innerWidth,
@@ -368,14 +370,93 @@
          <li>The target is outlined in yellow, but only on the Director's screen.</li>
          <li>Both of you can chat freely (chat box below the shapes), but the Director must send
              at least one message before the Matcher can choose.</li>
+         <li>The shapes are arranged differently on your two screens. Describe the shape itself,
+             rather than its position.</li>
          <li>You have ${roundSeconds} seconds. If time runs out, you move on.</li>
          <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
              Matcher picked a different one, their pick is outlined in blue.</li>
        </ul>
        <p>There are ${totalRounds} rounds in ${CONFIG.BLOCKS} blocks of ${SHAPES.length}, with no breaks.</p>
-       <p>Next you will wait to be paired with a partner.</p>`,
+       <p>${CONFIG.COMPREHENSION_CHECK ? "Next, answer three quick questions about the task. Then you" : "Next you"}
+          will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
     );
+
+    // Use the existing call-function plugin so this check adds no browser dependencies.
+    // Keep the pass flag explicitly: feedback also creates a row, so last(1) is not the answer row.
+    let comprehensionPassed = false;
+    let comprehensionAttempt = 0;
+    const comprehensionQuestions = [
+      {
+        name: "target_visibility",
+        title: "Who sees the yellow target highlight during a round?",
+        choices: ["Both participants", "Only the Director", "Only the Matcher"],
+        answer: "Only the Director",
+        explanation: "Only the Director sees the yellow target highlight. The Matcher uses the Director's description.",
+      },
+      {
+        name: "click_gate",
+        title: "When can the Matcher click a shape?",
+        choices: ["As soon as the round starts", "After the Matcher sends a message", "After the Director sends a message in that round"],
+        answer: "After the Director sends a message in that round",
+        explanation: "The Director must send at least one message each round before the Matcher can click. Both participants may ask questions or chat throughout.",
+      },
+      {
+        name: "layout",
+        title: "How should the Director identify the target to the Matcher?",
+        choices: ["Describe what the shape looks like", "Give its position on the Director's screen", "Tell the Matcher to choose the yellow shape"],
+        answer: "Describe what the shape looks like",
+        explanation: "The layouts differ between screens, and the Matcher cannot see the yellow highlight. Describe the shape itself rather than its position.",
+      },
+    ];
+    const comprehensionLoop = {
+      timeline: [
+        {
+          type: jsPsychCallFunction,
+          async: true,
+          func: (done) => {
+            const startedAt = performance.now();
+            comprehensionAttempt += 1;
+            const display = jsPsych.getDisplayElement();
+            display.innerHTML = `<form id="comprehension-form" style="max-width:40em;margin:2em auto;text-align:left;line-height:1.5">
+              <h2>Check your understanding</h2>
+              <p>Please answer all three questions. If you miss one, we'll explain it and you can try again.</p>
+              ${comprehensionQuestions.map((q) => `<fieldset style="margin:1em 0"><legend>${q.title}</legend>
+                ${jsPsych.randomization.shuffle(q.choices).map((choice) => `<label style="display:block;padding:0.3em">
+                  <input type="radio" name="${q.name}" value="${q.choices.indexOf(choice)}" required> ${choice}</label>`).join("")}
+              </fieldset>`).join("")}
+              <button type="submit">Check answers</button></form>`;
+            display.querySelector("form").addEventListener("submit", (event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const response = Object.fromEntries(comprehensionQuestions.map((q) =>
+                [q.name, q.choices[Number(form.get(q.name))]],
+              ));
+              const incorrect = comprehensionQuestions.filter((q) => response[q.name] !== q.answer);
+              comprehensionPassed = incorrect.length === 0;
+              done({ instruction_screen: "comprehension", comprehension_attempt: comprehensionAttempt,
+                comprehension_passed: comprehensionPassed, response,
+                incorrect_questions: incorrect.map((q) => q.name), rt: performance.now() - startedAt });
+            }, { once: true });
+          },
+          on_finish: () => saveProgress(`comprehension-${comprehensionAttempt}`),
+        },
+        {
+          type: jsPsychCallFunction,
+          async: true,
+          func: (done) => {
+            const feedback = comprehensionPassed
+              ? "<h2>Correct!</h2><p>You're ready to wait for a partner.</p>"
+              : `<h2>Please try again</h2><p>One or more answers were incorrect. Please remember:</p>
+                 <ul style="text-align:left">${comprehensionQuestions.map((q) => `<li>${q.explanation}</li>`).join("")}</ul>`;
+            continueScreen(feedback, { instruction_screen: "comprehension_feedback",
+              comprehension_attempt: comprehensionAttempt, comprehension_passed: comprehensionPassed }).func(done);
+          },
+        },
+      ],
+      conditional_function: () => CONFIG.COMPREHENSION_CHECK,
+      loop_function: () => !comprehensionPassed,
+    };
 
     const connectedCount = (presence) =>
       Object.values(presence).filter((status) => status === "connected").length;
@@ -828,6 +909,7 @@
       await jsPsych.run([
         preloadTrial,
         generalInstructions,
+        comprehensionLoop,
         waitingRoom,
         pairingPhase,
         roleRecap,
