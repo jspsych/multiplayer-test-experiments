@@ -165,6 +165,8 @@
       NO_MATCH_PAYMENT_USD: 1.25,
       LOBBY_TIMEOUT_MS: 5 * 60000,
       PAIRING_TIMEOUT_MS: 30000,
+      // Wait for both participants to finish instructions/quiz before starting role assignment.
+      PREPARATION_TIMEOUT_MS: 5 * 60000,
       // How long to wait after the role recap for the partner to press Continue before giving up
       // and routing to the no-match exit. Without this barrier the faster reader would start round
       // 1 (and its 60s timer) alone while the partner is still reading, desyncing the two timelines.
@@ -217,6 +219,7 @@
       deployment: onJatos ? "jatos" : "local",
       config_blocks: CONFIG.BLOCKS,
       config_comprehension_check: CONFIG.COMPREHENSION_CHECK,
+      config_preparation_timeout_ms: CONFIG.PREPARATION_TIMEOUT_MS,
       config_n_stimuli: SHAPES.length,
       config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
       viewport_w: window.innerWidth,
@@ -528,6 +531,54 @@
           },
         );
       },
+    };
+
+    const preparationBarrier = {
+      timeline: [{
+        type: jsPsychCallFunction,
+        async: true,
+        func: (done) => {
+          const startedAt = Date.now();
+          jsPsych.getDisplayElement().innerHTML =
+            `<p>Waiting for your partner to finish the instructions and questions…</p>
+             <p>If we cannot start within ${Math.round(CONFIG.PREPARATION_TIMEOUT_MS / 60000)} minutes,
+                we will end the study and still pay you ${money(CONFIG.NO_MATCH_PAYMENT_USD)} for your time.</p>`;
+          let finished = false;
+          const finish = (reason) => {
+            if (finished) return;
+            finished = true;
+            clearInterval(ticker);
+            if (reason) noMatchReason = reason;
+            done({ preparation_result: reason ?? "prepared", preparation_wait_ms: Date.now() - startedAt });
+          };
+          const ticker = setInterval(() => {
+            try {
+              const members = jsPsych.multiplayer.group().members;
+              const presence = jsPsych.multiplayer.presence();
+              const state = jsPsych.multiplayer.getAll({ scope: "session" });
+              if (members.some((id) => presence[id] === "left")) {
+                finish("partner_left_before_start");
+                return;
+              }
+              if (members.length === MIN_PLAYERS && members.every((id) =>
+                presence[id] === "connected" && state[id]?.prepared === true)) {
+                finish(null);
+                return;
+              }
+            } catch {
+              // Unreadable state must not start pairing; the deadline still bounds the wait.
+            }
+            if (Date.now() - startedAt >= CONFIG.PREPARATION_TIMEOUT_MS) finish("partner_not_ready");
+          }, 500);
+          try {
+            Promise.resolve(jsPsych.multiplayer.update({ prepared: true }, { scope: "session" }))
+              .catch(() => {});
+          } catch {
+            // A failed write also remains bounded by the preparation deadline.
+          }
+        },
+      }],
+      conditional_function: () => !noMatchReason,
     };
 
     // Fixed director/matcher for the whole game, drawn from the session's shared randomness, so
@@ -911,6 +962,7 @@
         generalInstructions,
         comprehensionLoop,
         waitingRoom,
+        preparationBarrier,
         pairingPhase,
         roleRecap,
         readyBarrier,
