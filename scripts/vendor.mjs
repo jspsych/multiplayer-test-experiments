@@ -42,10 +42,9 @@ const VENDOR = path.join(REPO, "vendor");
 const checkout = path.resolve(process.argv[2] ?? path.join(REPO, "..", "jspsych-multiplayer"));
 
 const run = (cmd, args, cwd) =>
-  // Without a shell, Node launches via CreateProcess, which only tries a bare name with ".exe"
-  // appended, so a bare "npm" never resolves npm.cmd/npm.ps1 on Windows. A shell fixes that
-  // (cmd.exe honours PATHEXT); Unix shells resolve "npm" either way.
-  execFileSync(cmd, args, { cwd, stdio: "inherit", shell: process.platform === "win32" });
+  // Windows needs a shell to resolve npm.cmd; npm's arguments below are static.
+  // Launch Git directly so worktree paths containing spaces remain single arguments.
+  execFileSync(cmd, args, { cwd, stdio: "inherit", shell: process.platform === "win32" && cmd === "npm" });
 const sha256 = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
 async function download(url) {
