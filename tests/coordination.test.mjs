@@ -1,156 +1,67 @@
+// Protocol faults are exercised against actual core in the patched upstream suite.
+// These tests assert Hawkins analysis/routing at the replacement boundary.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import "../round-coordinator.js";
-const create = globalThis.HawkinsRoundCoordination.createRoundCoordinator;
-const budgets = { responseMs: 1000, readyMs: 300, receiptMs: 200, feedbackMs: 400, writeMs: 200 };
-function pair() {
-  let time = 0, delivery = true;
-  const queue = [], sent = [], nodes = {};
-  for (const me of ["m", "d"]) nodes[me] = create({ ...budgets,
-    me, matcher: "m", director: "d", roundId: "dyad:m:0", now: () => time,
-    send: snapshot => {
-      sent.push({ sender: me, snapshot: structuredClone(snapshot) });
-      queue.push({ sender: me, snapshot: structuredClone(snapshot) });
-      return Promise.resolve();
-    },
-  });
-  function flush() {
-    if (!delivery) return;
-    let count = 0;
-    while (queue.length) {
-      assert.ok(++count < 100, "protocol must settle");
-      const { sender, snapshot } = queue.shift();
-      nodes[sender === "m" ? "d" : "m"].observe(sender, snapshot);
-    }
-  }
-  async function advance(ms, ticking = ["m", "d"]) {
-    time += ms;
-    await Promise.resolve(); // Complete confirmed transport writes.
-    for (const id of ticking) nodes[id].tick();
-    flush(); await Promise.resolve();
-  }
-  function ready() { nodes.m.ready(); nodes.d.ready(); flush(); }
-  return { nodes, sent, queue, ready, flush, advance,
-    setDelivery(value) { delivery = value; }, setTime(value) { time = value; } };
-}
-test("delayed trial entry does not consume response time", async () => {
-  const p = pair(); p.nodes.m.ready(); p.flush(); await p.advance(250);
-  assert.equal(p.nodes.m.view().phase, "preparing");
-  p.nodes.d.ready(); p.flush(); await p.advance(999);
-  assert.equal(p.nodes.m.view().phase, "active");
-  await p.advance(1); assert.equal(p.nodes.m.view().result.kind, "timeout");
-});
-test("pre-expiry matcher selection survives delivery after expiry", async () => {
-  const p = pair(); p.ready(); await p.advance(999); p.setDelivery(false);
-  p.nodes.m.select({ assignment: { 1: "A" }, rt: -999 });
-  await p.advance(50, ["d"]);
-  assert.equal(p.nodes.d.view().phase, "active");
-  p.setDelivery(true); p.flush();
-  assert.deepEqual(p.nodes.d.view().result, p.nodes.m.view().result);
-  assert.equal(p.nodes.d.view().result.submission.rt, 999);
-  assert.equal(p.nodes.d.view().result.kind, "selection");
-  await p.advance(1); // Authority must never revise selection to timeout.
-  assert.equal(p.nodes.m.view().result.kind, "selection");
-});
-test("at deadline, a selection loses even before timeout callback", () => {
-  const p = pair(); p.ready(); p.setTime(1000);
-  p.nodes.m.select({ assignment: { 1: "A" } }); p.flush();
-  assert.equal(p.nodes.m.view().result.kind, "timeout");
-  assert.deepEqual(p.nodes.m.view().result.submission.assignment, {});
-  assert.equal(p.nodes.m.select({ assignment: { 1: "B" } }), false);
-});
-test("competing director timeout observation cannot publish a result", () => {
-  const p = pair(); p.ready();
-  assert.equal(p.nodes.d.select({ assignment: {} }), false);
-  p.nodes.m.observe("d", { roundId: "dyad:m:0", authority: {
-    revision: 99, phase: "result", result: { kind: "timeout" } } });
-  assert.equal(p.nodes.m.view().result, null);
-});
-test("duplicate/stale results and acknowledgments cannot advance feedback", async () => {
-  const p = pair(); p.ready(); p.nodes.m.select({ assignment: { 1: "A" } }); p.flush();
-  const result = p.nodes.m.view().result;
-  p.nodes.m.received(result.id); p.nodes.d.received(result.id); p.flush();
-  p.nodes.m.feedbackDone(result.id); p.flush();
-  for (let i = 0; i < 3; i++) {
-    p.nodes.m.feedbackDone(result.id); p.nodes.m.feedbackDone("old");
-    for (const packet of p.sent.slice()) p.nodes.d.observe(packet.sender, packet.snapshot);
-  }
-  assert.equal(p.nodes.m.view().phase, "result");
-  await p.advance(350);
-  p.nodes.d.feedbackDone(result.id); p.flush();
-  assert.equal(p.nodes.m.view().phase, "complete");
-  assert.equal(p.nodes.d.view().phase, "complete");
-});
-test("coalesced state can skip active and still deliver one result", () => {
-  const p = pair(); p.nodes.m.ready(); p.nodes.d.ready();
-  const dReady = p.sent.find(x => x.sender === "d"); p.nodes.m.observe("d", dReady.snapshot);
-  p.nodes.m.select({ assignment: { 1: "A" } });
-  const result = p.sent.at(-1); p.nodes.d.observe("m", result.snapshot);
-  assert.equal(p.nodes.d.view().result.kind, "selection");
-});
-test("conflicting result fails explicitly and preserves accepted result", () => {
-  const p = pair(); p.ready(); p.nodes.m.select({ assignment: { 1: "A" } }); p.flush();
-  const packet = structuredClone(p.sent.findLast(x => x.sender === "m"));
-  packet.snapshot.authority.revision++;
-  packet.snapshot.authority.result.submission.assignment[1] = "B";
-  p.nodes.d.observe("m", packet.snapshot);
-  assert.equal(p.nodes.d.view().failure.reason, "conflicting_result");
-  assert.equal(p.nodes.d.view().result.submission.assignment[1], "A");
-});
-test("stale round and stale ack identities cannot release barriers", () => {
-  const p = pair(); p.nodes.m.ready();
-  p.nodes.m.observe("d", { roundId: "dyad:m:previous", ready: true });
-  assert.equal(p.nodes.m.view().phase, "preparing");
-  p.nodes.d.ready(); p.flush(); p.nodes.m.select({ assignment: { 1: "A" } }); p.flush();
-  p.nodes.m.received("old"); p.nodes.d.received("old"); p.flush();
-  p.nodes.m.feedbackDone("old"); p.nodes.d.feedbackDone("old"); p.flush();
-  assert.equal(p.nodes.m.view().phase, "result");
-});
-test("missing readiness is coordination failure, never behavioral timeout", async () => {
-  const p = pair(); p.nodes.m.ready(); await p.advance(300);
-  assert.equal(p.nodes.m.view().failure.reason, "readiness_timeout");
-  assert.equal(p.nodes.m.view().result, null);
-});
-test("frozen matcher is bounded by the director, with no replacement", async () => {
-  const p = pair(); p.ready(); await p.advance(1200, ["d"]);
-  assert.equal(p.nodes.d.view().failure.reason, "result_delivery_timeout");
-  assert.equal(p.nodes.d.view().result, null);
-});
-test("matcher resuming after a long freeze does not create an ordinary timeout", async () => {
-  const p = pair(); p.ready(); await p.advance(1201, ["m"]);
-  assert.equal(p.nodes.m.view().failure.reason, "authority_stalled");
-  assert.equal(p.nodes.m.view().result, null);
-});
-test("frozen receiver causes missing result acknowledgment failure", async () => {
-  const p = pair(); p.ready(); p.nodes.m.select({ assignment: { 1: "A" } }); p.flush();
-  p.nodes.m.received(p.nodes.m.view().result.id); await p.advance(200, ["m"]);
-  assert.equal(p.nodes.m.view().failure.reason, "result_ack_timeout");
-  assert.equal(p.nodes.m.view().result.kind, "selection");
-});
-test("frozen feedback completion has its own bounded failure", async () => {
-  const p = pair(); p.ready(); p.nodes.m.select({ assignment: { 1: "A" } }); p.flush();
-  const id = p.nodes.m.view().result.id;
-  p.nodes.m.received(id); p.nodes.d.received(id); p.nodes.m.feedbackDone(id); p.flush();
-  await p.advance(600);
-  assert.equal(p.nodes.m.view().failure.reason, "feedback_ack_timeout");
-});
-for (const reason of ["participant_left", "connection_lost", "cancelled", "reload"]) {
-  test(`${reason} fails without authority replacement or timeout`, () => {
-    const p = pair(); p.ready(); p.nodes.m.fail(reason); p.flush();
-    assert.equal(p.nodes.m.view().failure.reason, reason);
-    assert.equal(p.nodes.d.view().result, null);
-    assert.ok(p.nodes.d.view().failure);
-    assert.equal(p.nodes.m.select({ assignment: { 1: "A" } }), false);
+import fs from "node:fs";
+import vm from "node:vm";
+import "../hawkins.js";
+const classify = globalThis.Hawkins.classifyRound;
+for (const described of [false, true]) {
+  test(`timeout attribution follows immutable matcher observation (${described})`, () => {
+    const data = { role: "director", multiplayer_outcome: "timeout", correct: false,
+      n_correct: 0, accuracy: 0, rt: 60000, message_count: 1, messages_sent: 1,
+      coordination_round_id: "dyad-round", coordination_result: {
+        id: "result", kind: "timeout", value: null, rt: 60000,
+        context: { directorDescribed: described },
+      } };
+    const fields = classify(data);
+    assert.equal(fields.local_idle_role, "matcher");
+    assert.equal(fields.idle_role, described ? "matcher" : "director");
+    for (const key of ["correct", "n_correct", "accuracy", "rt"]) assert.equal(fields[key], null);
+    assert.equal(fields.director_messages, 1);
   });
 }
-test("write rejection and missing confirmation are bounded failures", async () => {
-  let time = 0;
-  const node = create({ ...budgets, me: "m", matcher: "m", director: "d", roundId: "x", now: () => time,
-    send: () => new Promise(() => {}) });
-  node.ready(); time = budgets.writeMs; node.tick();
-  assert.equal(node.view().failure.reason, "write_confirmation_timeout");
-  const rejected = create({ ...budgets, me: "m", matcher: "m", director: "d", roundId: "x", now: () => 0,
-    send: () => Promise.reject(new Error("offline")) });
-  rejected.ready(); await Promise.resolve();
-  assert.equal(rejected.view().failure.reason, "transport_write_failed");
+for (const outcome of ["completed", "timeout", "connection_lost"]) {
+  test(`coordination failure remains visible with ${outcome}`, () => {
+    const data = { multiplayer_outcome: outcome, correct: true, assignment: outcome === "completed" ? "A" : null,
+      coordination_round_id: "dyad-round", coordination_failure: { reason: "feedback_ack_timeout" },
+      coordination_result: outcome === "timeout" ? { kind: "timeout", context: { directorDescribed: true } } : null };
+    assert.equal(classify(data).coordination_interrupted, true);
+    assert.equal(classify(data).round_result, outcome === "completed" ? "correct" : outcome);
+  });
+}
+test("page routes failure even after accepted behavior and keeps DataPipe disabled", () => {
+  const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
+  assert.match(html, /if \(data.coordination_failure\) \{[\s\S]*?interruption = "connection_lost"/);
+  assert.match(html, /if \(CONFIG.MATCHER_COORDINATION\) CONFIG.DATAPIPE_EXPERIMENT_ID = ""/);
+  assert.doesNotMatch(html, /createCoordinatedReferenceGame|round-coordinator.js/);
 });
+
+for (const kind of ["selection", "timeout"]) {
+  test(`actual page finish handler saves and aborts after accepted ${kind} plus failure`, () => {
+    const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
+    const game = html.slice(html.indexOf("    const gameRound ="), html.indexOf("    const gameLoop ="));
+    const handler = game.slice(game.indexOf("on_finish: (data) =>") + "on_finish: ".length,
+      game.lastIndexOf("    };")).trim().replace(/,$/, "");
+    let saves = 0, aborts = 0;
+    const context = vm.createContext({ CONFIG: { MATCHER_COORDINATION: true, JATOS_SAVE_PER_ROUND: true },
+      Hawkins: globalThis.Hawkins, roundCountdownInterval: null, roundFeedbackShown: false,
+      coordinationFailure: null, interruption: null, interruptedAtRound: null,
+      clearInterval() {}, saveProgress() { saves++; }, jsPsych: { abortCurrentTimeline() { aborts++; } } });
+    const finish = vm.runInContext(`(${handler})`, context);
+    const data = { round: 3, multiplayer_outcome: kind === "selection" ? "completed" : "timeout",
+      assignment: kind === "selection" ? "A" : null, correct: kind === "selection", n_correct: 1,
+      accuracy: 1, rt: 100, coordination_round_id: "dyad-round",
+      coordination_result: { kind, context: { directorDescribed: true } },
+      coordination_failure: { reason: "feedback_ack_timeout" } };
+    finish(data);
+    assert.equal(context.interruption, "connection_lost");
+    assert.equal(context.coordinationFailure, data.coordination_failure);
+    assert.equal(context.interruptedAtRound, 3);
+    assert.equal(saves, 1);
+    assert.equal(aborts, 1);
+    assert.equal(data.round_result, kind === "selection" ? "correct" : "timeout");
+    assert.equal(data.correct, kind === "selection" ? true : null);
+    assert.equal(data.coordination_interrupted, true);
+  });
+}

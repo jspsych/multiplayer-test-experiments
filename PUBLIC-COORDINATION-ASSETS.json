@@ -1,0 +1,100 @@
+{
+  "baseline": "3563868a671d37ca429314d3c2b73c712b0c77b7",
+  "combinedBaseline": "21a73451579782acc44d8946a466a0829bb0f261",
+  "frozenComparisonHead": "bf82c22",
+  "addedPRHeads": {
+    "36": "bd1638ee56722956c16dd91551ee5a302aa3d622",
+    "37": "f61d1263cfe21e7e707bc679e11f87a6fe5fafcd"
+  },
+  "sourceHashes": {
+    "reference-game-hawkins.html": "1b3d086d066edade244e745d0a9508f72d63ea88ce268bb44bb155035492642f",
+    "hawkins-coordination.js": "471daba147f768052928a9cb4b37ecd127e788636cb6e6bddd409ab18097d818",
+    "patches/public-result-context.patch": "b5725d1980ee6e1b67d620e7be858b8fc843db04807db7dae21699a04987ec1a",
+    "hawkins.js": "1f7d232080b0533de42c08ce7e35f45b75d230b93bb7e8dfbcf75d9c6a1da621",
+    "presence-check.js": "59c6c91e36b187185b51ff4b39261fa0bab1502a8704f41500d11ac4b7d6710d",
+    "tangrams.js": "75aa2b963a0bf588159cc230ca534964d89eea2b36a644aece2c6ac7ccbcdfdd",
+    "scripts/make-jzip.mjs": "2a8a56a10a75ea338e7b79ac27083d1e2de3ab08136d557d4af3750188c070ac",
+    "scripts/prepare-coordination.mjs": "99c54ba923b0f5df23b29a12fddf9db44eec098e2fd3e2dc3a79618ddd17dd63",
+    "scripts/vendor.mjs": "7c15da2f123b0a05ccbeb97be9e5e90f2750752731d7ee67af3b71fea87197c5",
+    "scripts/stage-public-source.mjs": "f59d0b0206047dca06c0ffc0a6103764b9cbb77b266953d8504c8aef4a925394",
+    "scripts/test-coordination-plugin.mjs": "d755e6c5fe5004be880a521e47276228c2ac2de89b5ca52cc20739011d1b0b8b",
+    "vendor/manifest.json": "a1aa504ba90a30e7b07244e78765c631083ca615c205fc4828f22bc270ab3557"
+  },
+  "dependencies": {
+    "multiplayer_commit": "044ae08c9fa149c375b8c32e55bb7a90d2b3f34b",
+    "upstream_patch": {
+      "file": "patches/public-result-context.patch",
+      "sha256": "b5725d1980ee6e1b67d620e7be858b8fc843db04807db7dae21699a04987ec1a"
+    },
+    "source_hashes": {
+      "package-lock.json": "aabd80559cdaab490ad0b5481f2f82ae6892fd34ac9db02beb2ec49382013614",
+      "packages/utils/src/round-coordinator.ts": "b6bb472f1a71f701e42ae7180eb11474b733d7095f9a91579a9de7c139c8cf14",
+      "packages/plugin-multiplayer-reference-game/src/index.ts": "4be34dd2e490058e08d91590fd08ac8195a18b3c0fc56358f7c5c4579534a8fe",
+      "vendor/jspsych/dist/index.js": "c360ac23b3dab7545d473a832f0df89c4a8611d9e95617793690278f0132d79d"
+    },
+    "jspsych_preview": "1e77da41966f22832ee0d133d137d81b3e50639a",
+    "jspsych_plugins": {
+      "plugin-html-keyboard-response": "2.2.0",
+      "plugin-preload": "2.1.0",
+      "plugin-call-function": "2.1.0"
+    },
+    "pipe_extension_version": "0.2.0",
+    "files": {
+      "jspsych.js": {
+        "source": "jspsych/jspsych-multiplayer@044ae08c9fa149c375b8c32e55bb7a90d2b3f34b vendor/jspsych/dist/index.browser.min.js",
+        "sha256": "62bc22ab7aa5418bc6e81880a5acd0fe9d135a067e88f131d99611b930bbcf77"
+      },
+      "jspsych.css": {
+        "source": "jspsych/jspsych-multiplayer@044ae08c9fa149c375b8c32e55bb7a90d2b3f34b vendor/jspsych/css/jspsych.css",
+        "sha256": "1761ad55163ef1bf0062148597c0206fb711986257a5a732527a4c705bf73e52"
+      },
+      "plugin-html-keyboard-response.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/plugin-html-keyboard-response@2.2.0/dist/index.browser.min.js",
+        "sha256": "8c9ab47cfd8f53f6481fa553b5dde4ac03d4797d47c8ffccfa8d4371b459a97e"
+      },
+      "plugin-preload.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/plugin-preload@2.1.0/dist/index.browser.min.js",
+        "sha256": "01588e1a9b9cc16b1e22df1ea0c6c1be6c9b284cc005d5e82ac5997ce6aad918"
+      },
+      "plugin-call-function.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/plugin-call-function@2.1.0/dist/index.browser.min.js",
+        "sha256": "7be9ca82020ac30f8a5943a3a5a281c52954936965daa7a67e0606455466a6fb"
+      },
+      "extension-pipe.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/extension-pipe@0.2.0/dist/index.browser.min.js",
+        "sha256": "4e440eec85172e93654280734837ba5185c45a947f075b339a8daa746c09db50"
+      },
+      "utils.js": {
+        "source": "jspsych/jspsych-multiplayer@044ae08c9fa149c375b8c32e55bb7a90d2b3f34b + patches/public-result-context.patch packages/utils/dist/index.browser.min.js",
+        "sha256": "ffa0ca4e44a9d719974c17ea2885850823b636e84b31ad57a37cb5fe4b0e21ee"
+      },
+      "adapter-multiplayer-local.js": {
+        "source": "jspsych/jspsych-multiplayer@044ae08c9fa149c375b8c32e55bb7a90d2b3f34b + patches/public-result-context.patch packages/adapter-multiplayer-local/dist/index.browser.min.js",
+        "sha256": "327a850ecdf25137d656f6854e2bb56327c49e4de0ca4c60a0c8d58ac1cc3edc"
+      },
+      "adapter-multiplayer-jatos.js": {
+        "source": "jspsych/jspsych-multiplayer@044ae08c9fa149c375b8c32e55bb7a90d2b3f34b + patches/public-result-context.patch packages/adapter-multiplayer-jatos/dist/index.browser.min.js",
+        "sha256": "03bd2e18dfadebda3d55d71f49e42c17c886b8b5a976beb2c1e75a0092f0db92"
+      },
+      "plugin-multiplayer-role.js": {
+        "source": "jspsych/jspsych-multiplayer@044ae08c9fa149c375b8c32e55bb7a90d2b3f34b + patches/public-result-context.patch packages/plugin-multiplayer-role/dist/index.browser.min.js",
+        "sha256": "d8e85ca8bcd0941d7b104de6838b3064348d26d3bd38dcb26ecd9000e8e87bb5"
+      },
+      "plugin-multiplayer-reference-game.js": {
+        "source": "jspsych/jspsych-multiplayer@044ae08c9fa149c375b8c32e55bb7a90d2b3f34b + patches/public-result-context.patch packages/plugin-multiplayer-reference-game/dist/index.browser.min.js",
+        "sha256": "215dd84f33d15824c9dab93ab5bc74ba6574848a2deba6a354fe0df425a5ee40"
+      }
+    }
+  },
+  "archive": "dist/hawkins-public-round-coordination.jzip",
+  "archiveSha256": "84fea1e4544521c9038fda94ed1ad8212892d188ee1caf2748761adb13c9fcd3",
+  "pinnedCoreVerified": true,
+  "archiveOverrides": {
+    "MATCHER_COORDINATION": true,
+    "DATAPIPE_EXPERIMENT_ID": ""
+  },
+  "browserValidated": false,
+  "jatosValidated": false,
+  "sourceBase": "bf82c22dff2bc8c459ec22938f96336d59925311",
+  "note": "Source base plus integration changes identified by sourceHashes; generated archive/raw datasets remain local and untracked."
+}

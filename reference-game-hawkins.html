@@ -22,8 +22,8 @@
     <script src="tangrams.js"></script>
     <script src="hawkins.js"></script>
     <script src="presence-check.js"></script>
-    <script src="round-coordinator.js"></script>
-    <script src="coordinated-reference-game.js"></script>
+    <script src="vendor/utils.js"></script>
+    <script src="hawkins-coordination.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
       /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
@@ -200,6 +200,7 @@
 
     const CONFIG = {
       // Opt-in review prototype. Its synthetic tests never write to configured DataPipe storage.
+      COORDINATION_DIAGNOSTICS: true,
       MATCHER_COORDINATION: new URLSearchParams(location.search).get("coordination") === "matcher",
       COORDINATION_READY_MS: 30000,
       COORDINATION_RECEIPT_MS: 15000,
@@ -243,10 +244,9 @@
       // and the round ends with "connection_lost". The core's default is to retry forever, which
       // leaves a JATOS participant whose channel the server closed stuck on "reconnecting".
       RECONNECT_GIVE_UP_MS: 60000,
-      // Google Drive-backed DataPipe study created primarily for testing. It may also be used
-      // for the main study; collaborators can create their own study and replace this ID.
-      // Empty disables DataPipe; JATOS result data is still saved independently.
-      DATAPIPE_EXPERIMENT_ID: "wE2Zlitn0uhu",
+      // Validation packet: DataPipe disabled; JATOS saves independently.
+      // A paid-run ID remains a later review choice.
+      DATAPIPE_EXPERIMENT_ID: "",
       JATOS_SAVE_PER_ROUND: true,
     };
 
@@ -257,7 +257,6 @@
     const datapipeFilename = `${crypto.randomUUID()}.json`;
     let pipeSaveResult = { skipped: true };
     if (CONFIG.MATCHER_COORDINATION) CONFIG.DATAPIPE_EXPERIMENT_ID = "";
-    const CoordinatedReferenceGame = createCoordinatedReferenceGame(jsPsychMultiplayerReferenceGame, CONFIG);
     const jsPsych = initJsPsych({
       extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,
@@ -798,7 +797,8 @@
     let roundCountdownInterval = null;
     let roundFeedbackShown = false;
     const gameRound = {
-      type: CONFIG.MATCHER_COORDINATION ? CoordinatedReferenceGame : jsPsychMultiplayerReferenceGame,
+      type: jsPsychMultiplayerReferenceGame,
+      ...(CONFIG.MATCHER_COORDINATION ? HawkinsCoordination.hooks(CONFIG, () => jsPsych.getDisplayElement()) : {}),
       stimuli: SHAPES,
       columns: 6, // 6×2 grid, as in the original
       cell_size: 130, // square cells, like the original's 300px ones (see the <style> block)
@@ -821,9 +821,10 @@
         matcher: { reveal_target: true, show_score: false, show_partner_choice: true },
       },
       feedback_duration: 3000,
-      // The matcher's timer submits the (empty) choice so both players reach feedback together.
-      selection_timeout: CONFIG.ROUND_TIMEOUT_MS,
-      round_timeout: CONFIG.ROUND_TIMEOUT_MS + CONFIG.ROUND_TIMEOUT_GRACE_MS,
+      // Coordinated mode delegates deadlines to utils; no independent behavioral backstop.
+      // Uncoordinated comparison mode keeps the original timers.
+      selection_timeout: CONFIG.MATCHER_COORDINATION ? null : CONFIG.ROUND_TIMEOUT_MS,
+      round_timeout: CONFIG.MATCHER_COORDINATION ? null : CONFIG.ROUND_TIMEOUT_MS + CONFIG.ROUND_TIMEOUT_GRACE_MS,
       // A partner who leaves ends the round with multiplayer_outcome: "participant_left".
       end_on_participant_left: true,
       // Suppressed during feedback (chat disabled) so it never covers the round's result.
@@ -914,11 +915,7 @@
               : "round_timeout",
         });
         if (CONFIG.MATCHER_COORDINATION) {
-          data.local_idle_role = data.idle_role;
-          if (data.timed_out) {
-            data.idle_role = data.coordination_result.context.directorDescribed ? "matcher" : "director";
-            data.timeout_source = "matcher_coordinator";
-          }
+          if (data.timed_out) data.timeout_source = "matcher_coordinator";
           if (data.coordination_failure) {
             coordinationFailure = data.coordination_failure;
             interruption = "connection_lost";

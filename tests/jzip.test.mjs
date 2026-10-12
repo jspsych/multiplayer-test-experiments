@@ -68,12 +68,12 @@ test("disposable coordination archive forces coordination and disables configure
   execFileSync("node", ["scripts/make-jzip.mjs"], { cwd: REPO,
     env: { ...process.env, JZIP_OUT: out, COORDINATION_PROTOTYPE: "1" } });
   const { entries } = readZip(fs.readFileSync(out));
-  const jas = JSON.parse(entries.get("hawkins-matcher-coordination.jas").toString());
+  const jas = JSON.parse(entries.get("hawkins-public-coordination.jas").toString());
   assert.match(jas.data.title, /disposable/);
   const html = entries.get(`${jas.data.dirName}/reference-game-hawkins.html`).toString();
   assert.match(html, /MATCHER_COORDINATION: true/);
   assert.match(html, /DATAPIPE_EXPERIMENT_ID: ""/);
-  for (const file of ["round-coordinator.js", "coordinated-reference-game.js", "presence-check.js"]) {
+  for (const file of ["hawkins-coordination.js", "vendor/utils.js", "presence-check.js"]) {
     assert.ok(entries.has(`${jas.data.dirName}/${file}`));
   }
 });

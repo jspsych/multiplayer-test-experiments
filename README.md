@@ -1,5 +1,10 @@
 # multiplayer-test-experiments
 
+This branch is the public Hawkins coordination integration packet. See
+[design](PUBLIC-COORDINATION-INTEGRATION.md) and [operator checks](PUBLIC-COORDINATION-OPERATOR.md).
+Validation DataPipe is disabled. The frozen facade and MindProbe evidence remain
+in `.worktrees/hawkins-coordination`; they do not validate this replacement.
+
 Matcher-owned coordination is an opt-in review prototype on this branch. See
 [design and acceptance](ROUND-COORDINATION.md) and
 [evidence, limitations and operator checks](COORDINATION-EVIDENCE.md).
@@ -80,8 +85,10 @@ should be ported to Hawkins rather than treating C&WG as the first launch target
 
 1. `npm run vendor`, with a [jspsych-multiplayer](https://github.com/jspsych/jspsych-multiplayer)
    checkout at `../jspsych-multiplayer` (or pass its path: `node scripts/vendor.mjs <path>`). This
-   builds the multiplayer bundles at the commit pinned in `scripts/vendor.mjs` and downloads the
-   pinned jsPsych preview build, plugins, and DataPipe Pipe extension into `vendor/`.
+   exports/builds the pinned public source with `patches/public-result-context.patch`.
+   Supply the sibling checkout path explicitly from this nested worktree. It reads the
+   core from that pin and reuses SHA-verified third-party assets from the frozen vendor.
+   See the operator record for exact commands.
 2. Serve the repo over http (e.g. `npx http-server .`) and open the page. It adds `?mp_session=…` to
    the URL.
 3. Open that full URL in exactly one other tab. The two tabs pair, and roles are drawn at random.
@@ -92,13 +99,10 @@ from a single study link and the adapter seals each pair.
 
 ### DataPipe setup for the Hawkins pilot
 
-`CONFIG.DATAPIPE_EXPERIMENT_ID` in `reference-game-hawkins.html` is configured for the Google
-Drive-backed DataPipe experiment `wE2Zlitn0uhu`. This folder was created primarily for testing;
-it may also be used for the main study, pending review. Collaborators are welcome to create their
-own [DataPipe experiment](https://pipe.jspsych.org/getting-started) with Google Drive as its storage
-provider and replace this one configuration value with their dashboard's 12-character experiment ID.
-Local runs also send data to the configured study; set the ID to an empty string to disable
-DataPipe for offline testing. Turn on **Accept new data** in the DataPipe dashboard and verify a completed test run in
+`CONFIG.DATAPIPE_EXPERIMENT_ID` is empty in this validation packet. Coordinated
+mode also disables Pipe before extension setup. Keep it disabled for all replacement
+checks; JATOS saving remains enabled. A later paid-run packet may configure a
+[DataPipe experiment](https://pipe.jspsych.org/getting-started), pending review, and verify a completed test run in
 the linked Drive folder before a paid run. The extension stages each completed trial and submits one
 JSON file when the jsPsych timeline ends; an abandoned run can yield a `.partial.json` file. The
 filename is random and carries no participant identifier. Prolific, participant, and dyad IDs remain

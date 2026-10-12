@@ -33,9 +33,9 @@
   // Which role let a timed-out round run out, or null if the round did not time out.
   //
   // The director must send a message before the matcher can click, so a timeout means either the
-  // director never sent one, or the director did and the matcher never clicked. Both players see
-  // the director's messages, so both reach the same answer from their own round data. That is the
-  // point: counting only "my partner was silent" makes the idle player blame the attentive one.
+  // director description was not observed locally, or was observed without a selection.
+  // Local counts can differ while messages are in transit. Coordinated mode uses the
+  // committed matcher observation for attribution and preserves this local estimate separately.
   function idleRole(data) {
     if (data.multiplayer_outcome !== "timeout") return null;
     const sent = data.messages_sent ?? 0;
@@ -59,7 +59,11 @@
       round_result:
         outcome === "completed" ? (data.correct ? "correct" : "incorrect") : outcome ?? null,
       timed_out: outcome === "timeout",
-      idle_role: idleRole(data),
+      idle_role: data.coordination_result?.kind === "timeout"
+        ? (data.coordination_result.context.directorDescribed ? "matcher" : "director")
+        : idleRole(data),
+      ...(data.coordination_round_id ? { local_idle_role: idleRole(data),
+        coordination_interrupted: Boolean(data.coordination_failure) } : {}),
       selection_made: data.assignment != null,
       director_messages: isDirector ? sent : received,
       matcher_messages: isDirector ? received : sent,

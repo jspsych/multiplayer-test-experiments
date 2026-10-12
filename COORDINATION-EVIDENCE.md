@@ -1,3 +1,8 @@
+> Historical frozen facade comparison record (bf82c22). Its paths and validation
+> refer to `.worktrees/hawkins-coordination`, not this replacement. See
+> [public integration](PUBLIC-COORDINATION-INTEGRATION.md) and
+> [new operator handoff](PUBLIC-COORDINATION-OPERATOR.md).
+
 # Prototype evidence, limitations and operator checks
 
 Follow-up: the operator subsequently completed local checks, and explicitly

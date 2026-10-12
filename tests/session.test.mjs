@@ -172,7 +172,7 @@ test("gated matcher clicks are counted from the matcher's interaction history", 
 test("the page never ends the game on a timeout", () => {
   const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /IDLE_ROUNDS|idleTracker|interruption = "inactive_/);
-  assert.match(html, /selection_timeout: CONFIG\.ROUND_TIMEOUT_MS/);
+  assert.match(html, /selection_timeout: CONFIG\.MATCHER_COORDINATION \? null : CONFIG\.ROUND_TIMEOUT_MS/);
 });
 
 // ---- Exit routing -------------------------------------------------------------------------------

@@ -41,8 +41,8 @@ const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 // ---- Run configuration (edit for the paid batch; code reads nothing else)
 const COORDINATION_PROTOTYPE = process.env.COORDINATION_PROTOTYPE === "1";
-const STUDY_TITLE = COORDINATION_PROTOTYPE ? "Hawkins matcher coordination disposable prototype" : "Hawkins pilot prototype";
-const DIR_NAME = COORDINATION_PROTOTYPE ? "hawkins-matcher-coordination" : "hawkins-pilot-prototype"; // must avoid JATOS reserved names
+const STUDY_TITLE = COORDINATION_PROTOTYPE ? "Hawkins public coordination disposable prototype" : "Hawkins pilot prototype";
+const DIR_NAME = COORDINATION_PROTOTYPE ? "hawkins-public-coordination" : "hawkins-pilot-prototype"; // must avoid JATOS reserved names
 const ENTRY_HTML = "reference-game-hawkins.html";
 const BATCH = {
   title: "Single dyad test",
@@ -69,8 +69,7 @@ const ASSET_PATHS = [
   "reference-game-hawkins.html",
   "tangrams.js",
   "hawkins.js",
-  "round-coordinator.js",
-  "coordinated-reference-game.js",
+  "hawkins-coordination.js",
   "presence-check.js",
   "assets/tangrams/tangram_A.png",
   "assets/tangrams/tangram_B.png",
@@ -258,6 +257,7 @@ if (new Set(roots).size !== 2) {
 }
 
 const outPath = path.resolve(REPO, OUT_NAME);
+if (fs.existsSync(outPath)) throw new Error("Archive exists; choose a fresh JZIP_OUT to preserve it");
 fs.writeFileSync(outPath, writeZip(entries));
 console.log(`wrote ${OUT_NAME} (${entries.length} entries)`);
 console.log(`study: "${STUDY_TITLE}" | assets dir: ${DIR_NAME}/ | entry: ${ENTRY_HTML}`);
