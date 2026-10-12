@@ -13,6 +13,10 @@ live, version, and be piloted independently.
   handling and data saving. Runs on the local adapter or as a JATOS group study.
 - [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, idle detection, exit
   routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
+- [`presence-check.js`](presence-check.js) — a jsPsych extension on each Hawkins round: after 30s
+  with no mouse, keyboard, scroll or touch activity it asks "Are you still with us?" and waits 15s
+  for a button click. A reminder only: missed prompts are recorded (`presence_*` fields) but never
+  end the round or the game.
 - [`scripts/vendor.mjs`](scripts/vendor.mjs) — fills the gitignored `vendor/` with every script the
   Hawkins page loads, at pinned versions. [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
   the page as a JATOS study archive.
@@ -40,6 +44,10 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 > **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) purely so
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
 > it ends are logged as a timeout (`multiplayer_outcome: "timeout"` in the Hawkins build, `ended_by: "timeout"` in C&WG) with a null assignment, so they're easy to exclude.
+> In the Hawkins build the limit is the matcher's `selection_timeout`: both players see a "Time's up"
+> result and the game moves on. A timed-out row has `round_result: "timeout"`, `correct: null`, and an
+> `idle_role` (`"director"` if no director message arrived, otherwise `"matcher"`). Timeouts never end
+> the game; only a disconnection does.
 
 ## Current pilot direction
 
@@ -103,8 +111,10 @@ way the Hawkins build was.
 **Not yet.** [`READINESS.md`](READINESS.md) is the full audit, written before jspsych-multiplayer
 gained session IDs, group formation and rejoin detection, so parts of it are out of date. The Hawkins
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
-randomness, dropout and idle detection with paid exits, reload detection, Prolific IDs and
-completion routing, and saving to JATOS and/or DataPipe. Still open:
-real completion codes are unset in `CONFIG`, a Google Drive test upload and the real JATOS run are outstanding,
+randomness, dropout detection with paid exits, per-round timeout classification (timeouts never end
+the game), reload detection, Prolific IDs and
+completion routing, and saving to JATOS and/or DataPipe. Real completion codes remain unset in
+`CONFIG`. The integrated JATOS-to-Drive run is recorded in INTEGRATION.md; failure paths and
+JATOS result-store consistency still need verification.
 and the multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit and a
 jsPsych preview build).

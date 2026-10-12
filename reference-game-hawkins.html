@@ -21,6 +21,7 @@
     <script src="vendor/plugin-multiplayer-reference-game.js"></script>
     <script src="tangrams.js"></script>
     <script src="hawkins.js"></script>
+    <script src="presence-check.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
       /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
@@ -91,6 +92,48 @@
         background: #1971c2;
       }
 
+      /* "Time's up" note in the round header, shown during a timed-out round's feedback. */
+      .hk-round-note {
+        min-height: 1.2em;
+        margin: 0.2em 0;
+        font-weight: 600;
+      }
+      .hk-round-note.is-timeout {
+        color: #c92a2a;
+      }
+
+      /* "Are you still with us?" reminder (presence-check.js). The backdrop takes clicks so the
+         button is the only response; the round's timers keep running underneath. */
+      .presence-check {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.45);
+      }
+      .presence-check[hidden] {
+        display: none;
+      }
+      .presence-check-card {
+        max-width: 26em;
+        padding: 1.2em 1.6em;
+        border-radius: 8px;
+        background: #fff;
+        text-align: center;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+      }
+      .presence-check-button {
+        padding: 0.5em 1.4em;
+        font-size: 1.05em;
+      }
+      .presence-check-remaining {
+        margin-bottom: 0;
+        font-size: 0.9em;
+        color: #555;
+      }
+
       /* "Partner is typing…" hint from the plugin's `typing_indicator`. The original has one too
          (sharedUtils/clientBase.js sends `playerTyping` and shows "Other player is typing..."). */
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-typing-hint {
@@ -135,8 +178,11 @@
     //   1. 18 rounds instead of 72: three blocks of six targets, played without breaks. A shared
     //      shuffle selects six of the twelve tangrams per dyad; each is targeted once per block.
     //      All twelve tangrams remain visible on every trial.
-    //   2. `round_timeout` (60s). The original ran untimed. The timeout ends a round when a player
-    //      stays connected but never acts; timed-out rounds have `multiplayer_outcome: "timeout"`.
+    //   2. A 60s round limit. The original ran untimed. When it runs out the matcher's empty choice
+    //      is submitted (`selection_timeout`), both players see a "Time's up" result for the usual
+    //      feedback duration, and the game moves on. Timed-out rounds have
+    //      `multiplayer_outcome: "timeout"`, `round_result: "timeout"` and an `idle_role`; they are
+    //      never scored as incorrect and never end the game. Only a disconnection does.
     //   3. Gate semantics. The original sets `messageSent` on ANY chat message, including the
     //      matcher's own, so a matcher could unlock their click by typing. The plugin counts only the
     //      partner's message, which is the stricter reading and, judging by the source comment, the
@@ -161,7 +207,7 @@
         complete: "insertcodehere",
         partner_dropped: "insertcodehere", // partner left or went idle, or connection was lost
         no_match: "insertcodehere", // never got a partner
-        inactive: "insertcodehere", // this participant went idle mid-game
+        inactive: "insertcodehere", // unused: timeouts no longer end the game
         reloaded: "insertcodehere", // this participant reloaded the page mid-session
       },
       PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
@@ -174,9 +220,15 @@
       // and routing to the no-match exit. Without this barrier the faster reader would start round
       // 1 (and its 60s timer) alone while the partner is still reading, desyncing the two timelines.
       READY_TIMEOUT_MS: 2 * 60000,
+      // Round limit, as the matcher's `selection_timeout`: on expiry both players see feedback.
       ROUND_TIMEOUT_MS: 60000,
-      // End the game once the same role lets this many rounds in a row time out.
-      IDLE_ROUNDS: 2,
+      // Backstop `round_timeout` after the limit, for when the matcher's submission never arrives
+      // (e.g. a frozen tab). That round ends without feedback, still as a timeout.
+      ROUND_TIMEOUT_GRACE_MS: 5000,
+      // "Are you still with us?" reminder during rounds (presence-check.js): shown after this long
+      // with no activity, closed as missed if its button is not clicked in time. Never ends the game.
+      PRESENCE_PROMPT_MS: 30000,
+      PRESENCE_RESPONSE_MS: 15000,
       // How long a partner can be disconnected before they count as gone (core default: 10s).
       DROPOUT_TIMEOUT_MS: 30000,
       // How long this participant's own connection can stay down before the session gives up on it
@@ -197,7 +249,7 @@
     const datapipeFilename = `${crypto.randomUUID()}.json`;
     let pipeSaveResult = { skipped: true };
     const jsPsych = initJsPsych({
-      extensions: [{
+      extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,
         params: {
           experiment_id: CONFIG.DATAPIPE_EXPERIMENT_ID,
@@ -262,25 +314,32 @@
     let partnerId = null;
     let reloaded = false;
     let noMatchReason = null;
-    let interruption = null; // "partner_left" | "connection_lost" | "inactive_self" | "inactive_partner"
+    let interruption = null; // "partner_left" | "connection_lost"
     let interruptedAtRound = null;
     let outcome = null;
 
-    const idleTracker = Hawkins.createIdleTracker(CONFIG.IDLE_ROUNDS);
-
     const completedRounds = () =>
       jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", multiplayer_outcome: "completed" });
+    // Rounds that ran to their end, with a choice or a timeout; the game goes on after either.
+    const playedRounds = () =>
+      jsPsych.data
+        .get()
+        .filterCustom((t) => t.trial_type === "multiplayer-reference-game" &&
+          (t.multiplayer_outcome === "completed" || t.multiplayer_outcome === "timeout"));
 
     function recordOutcome(exit) {
       if (outcome) return;
       const completed = completedRounds().count();
+      const played = playedRounds().count();
       outcome = {
         ended_reason: exit,
         no_match_reason: noMatchReason,
         interrupted_at_round: interruptedAtRound,
         n_trials_completed: completed,
+        n_trials_timed_out: played - completed,
+        n_trials_played: played,
         n_trials_scheduled: SCHEDULE.length,
-        blocks_completed: Math.floor(completed / CONFIG.TARGETS_PER_BLOCK),
+        blocks_completed: Math.floor(played / CONFIG.TARGETS_PER_BLOCK),
       };
       jsPsych.data.addProperties(outcome);
     }
@@ -369,7 +428,11 @@
          <li>The shapes are arranged differently on your two screens. Describe the shape itself,
              rather than its position.</li>
          <li>You have ${roundSeconds} seconds to describe and pick a tangram. A countdown on every
-             trial shows the time remaining. If time runs out before the Matcher picks, you move on.</li>
+             trial shows the time remaining. If time runs out before the Matcher picks, you both
+             see a "Time's up" message (the Matcher also sees the correct shape), then move on to
+             the next trial.</li>
+         <li>If you're inactive for a while, a message will ask you to click a button to show
+             you're still with us.</li>
          <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
              Matcher picked a different one, their pick is outlined in blue.</li>
        </ul>
@@ -722,6 +785,7 @@
     };
 
     let roundCountdownInterval = null;
+    let roundFeedbackShown = false;
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -746,9 +810,21 @@
         matcher: { reveal_target: true, show_score: false, show_partner_choice: true },
       },
       feedback_duration: 3000,
-      round_timeout: CONFIG.ROUND_TIMEOUT_MS,
+      // The matcher's timer submits the (empty) choice so both players reach feedback together.
+      selection_timeout: CONFIG.ROUND_TIMEOUT_MS,
+      round_timeout: CONFIG.ROUND_TIMEOUT_MS + CONFIG.ROUND_TIMEOUT_GRACE_MS,
       // A partner who leaves ends the round with multiplayer_outcome: "participant_left".
       end_on_participant_left: true,
+      // Suppressed during feedback (chat disabled) so it never covers the round's result.
+      extensions: [{
+        type: jsPsychExtensionPresenceCheck,
+        params: {
+          prompt_after: CONFIG.PRESENCE_PROMPT_MS,
+          respond_within: CONFIG.PRESENCE_RESPONSE_MS,
+          paused: () =>
+            Boolean(document.querySelector(".jspsych-multiplayer-reference-game-chat-input")?.disabled),
+        },
+      }],
       save_interaction_history: true,
       // Instruction wording from the original (game.client.js `client_onjoingame`), with one fix:
       // the original tells both roles they may "talk to the director", a copy-paste slip, so the
@@ -759,7 +835,8 @@
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
         const header = `<p>Trial ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}
-          &nbsp;|&nbsp; Time remaining: <span id="round-remaining">${roundSeconds}s</span></p>`;
+          &nbsp;|&nbsp; Time remaining: <span id="round-remaining">${roundSeconds}s</span></p>
+          <p id="round-note" class="hk-round-note" aria-live="polite"></p>`;
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -771,14 +848,36 @@
           : `${header}<p><strong>You are the Matcher.</strong> ${matcher}</p>`;
       },
       on_load: () => {
-        // The plugin starts its wall-clock round timeout during synchronous trial setup, just
-        // before jsPsych calls on_load. Stop this display when feedback begins or the trial ends.
+        // The plugin starts its wall-clock timers during synchronous trial setup, just before
+        // jsPsych calls on_load. Stop this display when feedback begins or the trial ends.
+        // The plugin disables the chat input exactly when feedback starts (chat is otherwise
+        // always open here), and a timed-out round reaches feedback with no cell marked as picked.
+        const P = ".jspsych-multiplayer-reference-game";
         const remaining = document.getElementById("round-remaining");
-        const feedback = document.querySelector(".jspsych-multiplayer-reference-game-feedback");
+        const note = document.getElementById("round-note");
+        const chatInput = document.querySelector(`${P}-chat-input`);
         const deadline = Date.now() + CONFIG.ROUND_TIMEOUT_MS;
+        roundFeedbackShown = false;
         const update = () => {
-          if (feedback?.textContent) {
-            remaining.textContent = "Selection complete";
+          if (chatInput?.disabled) {
+            roundFeedbackShown = true;
+            const picked = document.querySelector(`${P}-cell.is-correct, ${P}-cell.is-wrong`);
+            if (picked) {
+              remaining.textContent = "Selection complete";
+            } else {
+              remaining.textContent = "Time's up";
+              const own = document.querySelectorAll(`${P}-chat-message.is-self`).length;
+              const all = document.querySelectorAll(`${P}-chat-message`).length;
+              const described = (myRole === "director" ? own : all - own) > 0;
+              const cause = described
+                ? "The Matcher didn't pick a shape this round."
+                : "The Director didn't send a description this round.";
+              note.textContent =
+                myRole === "matcher"
+                  ? `Time's up! ${cause} The correct shape is outlined in green.`
+                  : `Time's up! ${cause}`;
+              note.classList.add("is-timeout");
+            }
             clearInterval(countdownInterval);
           } else {
             remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
@@ -791,14 +890,20 @@
       on_finish: (data) => {
         clearInterval(roundCountdownInterval);
         roundCountdownInterval = null;
+        Object.assign(data, Hawkins.classifyRound(data), {
+          feedback_shown: roundFeedbackShown,
+          timeout_source:
+            data.multiplayer_outcome !== "timeout"
+              ? null
+              : roundFeedbackShown
+              ? "selection_timeout"
+              : "round_timeout",
+        });
         if (CONFIG.JATOS_SAVE_PER_ROUND) saveProgress();
 
+        // Timeouts never end the game; only a disconnection does.
         if (data.multiplayer_outcome === "participant_left") interruption = "partner_left";
         else if (data.multiplayer_outcome === "connection_lost") interruption = "connection_lost";
-        else {
-          const idle = idleTracker.record(data);
-          if (idle) interruption = idle === myRole ? "inactive_self" : "inactive_partner";
-        }
         if (interruption) {
           interruptedAtRound = data.round;
           jsPsych.abortCurrentTimeline();
@@ -815,7 +920,7 @@
     // ---- Terminal screen ------------------------------------------------------------------------
 
     function exitMessage(exit) {
-      const played = completedRounds().count();
+      const played = playedRounds().count();
       const progress = `<p>You completed ${played} of ${SCHEDULE.length} rounds together.</p>`;
       switch (exit) {
         case "reloaded":
@@ -853,10 +958,10 @@
             <p>Your connection to the game server dropped and did not come back, so we have ended
                the study here. <strong>Your payment is not affected.</strong></p>
             ${progress}`;
+        // Unreachable while timeouts never end the game; kept so every routed exit has a message.
         case "inactive_self":
           return `<h2>The game has ended</h2>
-            <p>The last ${CONFIG.IDLE_ROUNDS} rounds ran out of time while it was your turn, so we
-               have ended the game.</p>
+            <p>The game ended because you stopped taking part.</p>
             ${progress}`;
         case "complete": {
           const correct = completedRounds().filter({ correct: true }).count();
