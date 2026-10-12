@@ -1,5 +1,11 @@
 # multiplayer-test-experiments
 
+Matcher-owned coordination is an opt-in review prototype on this branch. See
+[design and acceptance](ROUND-COORDINATION.md) and
+[evidence, limitations and operator checks](COORDINATION-EVIDENCE.md).
+The documented `?coordination=matcher&mp_session=...` URL disables DataPipe for
+synthetic local testing; the default pilot page retains its existing configuration.
+
 Standalone, faithful replication builds of published reference-game studies, built on
 [jspsych-multiplayer](https://github.com/jspsych/jspsych-multiplayer) plugins. Ported out of that
 repo's `examples/` (which is meant for lightweight teaching demos, not study artifacts) so these can

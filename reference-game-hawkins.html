@@ -22,6 +22,8 @@
     <script src="tangrams.js"></script>
     <script src="hawkins.js"></script>
     <script src="presence-check.js"></script>
+    <script src="round-coordinator.js"></script>
+    <script src="coordinated-reference-game.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
       /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
@@ -197,6 +199,12 @@
     const MIN_PLAYERS = 2;
 
     const CONFIG = {
+      // Opt-in review prototype. Its synthetic tests never write to configured DataPipe storage.
+      MATCHER_COORDINATION: new URLSearchParams(location.search).get("coordination") === "matcher",
+      COORDINATION_READY_MS: 30000,
+      COORDINATION_RECEIPT_MS: 15000,
+      COORDINATION_FEEDBACK_MS: 30000,
+      COORDINATION_WRITE_MS: 15000,
       PILOT_LABEL: "hawkins-18-trial-paid-pilot",
       BLOCKS: 3,
       COMPREHENSION_CHECK: true,
@@ -248,6 +256,8 @@
     // staging metadata. Those identifiers remain in the saved trial rows.
     const datapipeFilename = `${crypto.randomUUID()}.json`;
     let pipeSaveResult = { skipped: true };
+    if (CONFIG.MATCHER_COORDINATION) CONFIG.DATAPIPE_EXPERIMENT_ID = "";
+    const CoordinatedReferenceGame = createCoordinatedReferenceGame(jsPsychMultiplayerReferenceGame, CONFIG);
     const jsPsych = initJsPsych({
       extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,
@@ -315,6 +325,7 @@
     let reloaded = false;
     let noMatchReason = null;
     let interruption = null; // "partner_left" | "connection_lost"
+    let coordinationFailure = null;
     let interruptedAtRound = null;
     let outcome = null;
 
@@ -787,7 +798,7 @@
     let roundCountdownInterval = null;
     let roundFeedbackShown = false;
     const gameRound = {
-      type: jsPsychMultiplayerReferenceGame,
+      type: CONFIG.MATCHER_COORDINATION ? CoordinatedReferenceGame : jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
       columns: 6, // 6×2 grid, as in the original
       cell_size: 130, // square cells, like the original's 300px ones (see the <style> block)
@@ -822,6 +833,7 @@
           prompt_after: CONFIG.PRESENCE_PROMPT_MS,
           respond_within: CONFIG.PRESENCE_RESPONSE_MS,
           paused: () =>
+            (CONFIG.MATCHER_COORDINATION && document.querySelector("[data-coordination-phase]")?.dataset.coordinationPhase !== "active") ||
             Boolean(document.querySelector(".jspsych-multiplayer-reference-game-chat-input")?.disabled),
         },
       }],
@@ -848,6 +860,8 @@
           : `${header}<p><strong>You are the Matcher.</strong> ${matcher}</p>`;
       },
       on_load: () => {
+        // Coordinated mode owns the approximate countdown from observed activation.
+        if (CONFIG.MATCHER_COORDINATION) return;
         // The plugin starts its wall-clock timers during synchronous trial setup, just before
         // jsPsych calls on_load. Stop this display when feedback begins or the trial ends.
         // The plugin disables the chat input exactly when feedback starts (chat is otherwise
@@ -891,7 +905,7 @@
         clearInterval(roundCountdownInterval);
         roundCountdownInterval = null;
         Object.assign(data, Hawkins.classifyRound(data), {
-          feedback_shown: roundFeedbackShown,
+          feedback_shown: CONFIG.MATCHER_COORDINATION ? Boolean(data.coordination_result) : roundFeedbackShown,
           timeout_source:
             data.multiplayer_outcome !== "timeout"
               ? null
@@ -899,6 +913,17 @@
               ? "selection_timeout"
               : "round_timeout",
         });
+        if (CONFIG.MATCHER_COORDINATION) {
+          data.local_idle_role = data.idle_role;
+          if (data.timed_out) {
+            data.idle_role = data.coordination_result.context.directorDescribed ? "matcher" : "director";
+            data.timeout_source = "matcher_coordinator";
+          }
+          if (data.coordination_failure) {
+            coordinationFailure = data.coordination_failure;
+            interruption = "connection_lost";
+          }
+        }
         if (CONFIG.JATOS_SAVE_PER_ROUND) saveProgress();
 
         // Timeouts never end the game; only a disconnection does.
@@ -954,6 +979,9 @@
                <strong>This is not your fault, and your payment is not affected.</strong></p>
             ${progress}`;
         case "connection_lost":
+          if (coordinationFailure) return `<h2>We couldn't keep the game coordinated</h2>
+            <p>The two browsers could not confirm the next step, so we have ended the study here.
+               <strong>Your payment is not affected.</strong></p>${progress}`;
           return `<h2>We lost the connection to the game</h2>
             <p>Your connection to the game server dropped and did not come back, so we have ended
                the study here. <strong>Your payment is not affected.</strong></p>

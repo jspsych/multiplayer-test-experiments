@@ -40,8 +40,9 @@ import { fileURLToPath } from "node:url";
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 // ---- Run configuration (edit for the paid batch; code reads nothing else)
-const STUDY_TITLE = "Hawkins pilot prototype";
-const DIR_NAME = "hawkins-pilot-prototype"; // must avoid JATOS reserved names
+const COORDINATION_PROTOTYPE = process.env.COORDINATION_PROTOTYPE === "1";
+const STUDY_TITLE = COORDINATION_PROTOTYPE ? "Hawkins matcher coordination disposable prototype" : "Hawkins pilot prototype";
+const DIR_NAME = COORDINATION_PROTOTYPE ? "hawkins-matcher-coordination" : "hawkins-pilot-prototype"; // must avoid JATOS reserved names
 const ENTRY_HTML = "reference-game-hawkins.html";
 const BATCH = {
   title: "Single dyad test",
@@ -68,6 +69,8 @@ const ASSET_PATHS = [
   "reference-game-hawkins.html",
   "tangrams.js",
   "hawkins.js",
+  "round-coordinator.js",
+  "coordinated-reference-game.js",
   "presence-check.js",
   "assets/tangrams/tangram_A.png",
   "assets/tangrams/tangram_B.png",
@@ -227,9 +230,17 @@ const jasName = `${DIR_NAME}.jas`;
 entries.push({ name: jasName, data: Buffer.from(buildJas(), "utf8") });
 entries.push({ name: `${DIR_NAME}/`, data: null });
 for (const p of ASSET_PATHS) {
+  let data = fs.readFileSync(path.join(REPO, p));
+  if (COORDINATION_PROTOTYPE && p === ENTRY_HTML) {
+    const source = data.toString("utf8");
+    const mode = /MATCHER_COORDINATION: new URLSearchParams\(location.search\).get\("coordination"\) === "matcher"/;
+    const pipe = /DATAPIPE_EXPERIMENT_ID: "[^"]*"/;
+    if (!mode.test(source) || !pipe.test(source)) throw new Error("Prototype configuration no longer matches the packager");
+    data = Buffer.from(source.replace(mode, "MATCHER_COORDINATION: true").replace(pipe, 'DATAPIPE_EXPERIMENT_ID: ""'));
+  }
   entries.push({
     name: `${DIR_NAME}/${p.split("/").join("/")}`,
-    data: fs.readFileSync(path.join(REPO, p)),
+    data,
   });
 }
 
