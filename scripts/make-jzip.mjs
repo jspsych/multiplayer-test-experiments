@@ -177,7 +177,7 @@ function buildJas() {
         uuid: crypto.randomUUID(),
         title: STUDY_TITLE,
         description:
-          "Hawkins reference-game paid pilot (36 rounds, 3 blocks). Paid-run validation build.",
+          "Hawkins reference-game paid pilot. Trial count and target selection follow CONFIG in reference-game-hawkins.html. Paid-run validation build.",
         groupStudy: true,
         groupSessionWriteScope: "SHARED", // multiplayer slot writes span members
         linearStudy: false,
