@@ -74,10 +74,13 @@ from a single study link and the adapter seals each pair.
 
 ### DataPipe setup for the Hawkins pilot
 
-Create a [DataPipe experiment](https://pipe.jspsych.org/getting-started) with Google Drive as its
-storage provider, then put the dashboard's 12-character experiment ID in
-`CONFIG.DATAPIPE_EXPERIMENT_ID` in `reference-game-hawkins.html`. Until that ID is set, the extension
-is disabled. Turn on **Accept new data** in the DataPipe dashboard and verify a completed test run in
+`CONFIG.DATAPIPE_EXPERIMENT_ID` in `reference-game-hawkins.html` is configured for the Google
+Drive-backed DataPipe experiment `wE2Zlitn0uhu`. This folder was created primarily for testing;
+it may also be used for the main study, pending review. Collaborators are welcome to create their
+own [DataPipe experiment](https://pipe.jspsych.org/getting-started) with Google Drive as its storage
+provider and replace this one configuration value with their dashboard's 12-character experiment ID.
+Local runs also send data to the configured study; set the ID to an empty string to disable
+DataPipe for offline testing. Turn on **Accept new data** in the DataPipe dashboard and verify a completed test run in
 the linked Drive folder before a paid run. The extension stages each completed trial and submits one
 JSON file when the jsPsych timeline ends; an abandoned run can yield a `.partial.json` file. The
 filename is random and carries no participant identifier. Prolific, participant, and dyad IDs remain
@@ -99,7 +102,7 @@ way the Hawkins build was.
 gained session IDs, group formation and rejoin detection, so parts of it are out of date. The Hawkins
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
 randomness, dropout and idle detection with paid exits, reload detection, Prolific IDs and
-completion routing, and saving to JATOS and/or DataPipe. Still open: real completion codes and the
-DataPipe ID are unset in `CONFIG`, a Google Drive test upload and the real JATOS run are outstanding,
+completion routing, and saving to JATOS and/or DataPipe. Still open:
+real completion codes are unset in `CONFIG`, a Google Drive test upload and the real JATOS run are outstanding,
 and the multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit and a
 jsPsych preview build).
