@@ -40,6 +40,10 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 > **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) purely so
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
 > it ends are logged as a timeout (`multiplayer_outcome: "timeout"` in the Hawkins build, `ended_by: "timeout"` in C&WG) with a null assignment, so they're easy to exclude.
+> In the Hawkins build the limit is the matcher's `selection_timeout`: both players see a "Time's up"
+> result and the game moves on. A timed-out row has `round_result: "timeout"`, `correct: null`, and an
+> `idle_role` (`"director"` if no director message arrived, otherwise `"matcher"`). Timeouts never end
+> the game; only a disconnection does.
 
 ## Current pilot direction
 
@@ -100,7 +104,8 @@ way the Hawkins build was.
 **Not yet.** [`READINESS.md`](READINESS.md) is the full audit, written before jspsych-multiplayer
 gained session IDs, group formation and rejoin detection, so parts of it are out of date. The Hawkins
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
-randomness, dropout and idle detection with paid exits, reload detection, Prolific IDs and
+randomness, dropout detection with paid exits, per-round timeout classification (timeouts never end
+the game), reload detection, Prolific IDs and
 completion routing, and saving to JATOS and/or DataPipe. Still open: real completion codes and the
 DataPipe ID are unset in `CONFIG`, a Google Drive test upload and the real JATOS run are outstanding,
 and the multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit and a
