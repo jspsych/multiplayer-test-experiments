@@ -61,6 +61,34 @@ test("each block asks for its own shuffle key", () => {
   assert.deepEqual(keys, ["schedule-block-0", "schedule-block-1", "schedule-block-2"]);
 });
 
+test("pilot repeats six targets across three blocks and partners agree", () => {
+  const a = sequentialSchedule(3, IDS, seededShuffle("dyad-1"), 6);
+  const b = sequentialSchedule(3, IDS, seededShuffle("dyad-1"), 6);
+  const c = sequentialSchedule(3, IDS, seededShuffle("dyad-2"), 6);
+  const subset = (schedule) => [...new Set(schedule.map((r) => r.targets[0]))].sort();
+  assert.equal(a.length, 18);
+  assert.equal(subset(a).length, 6);
+  assert.deepEqual(a, b);
+  assert.notDeepEqual(subset(a), subset(c));
+  assert.deepEqual(a.map((r) => r.round), [...Array(18).keys()]);
+  for (let block = 0; block < 3; block++) {
+    assert.deepEqual(a.filter((r) => r.block === block).map((r) => r.targets[0]).sort(), subset(a));
+  }
+  assert.equal(IDS.length, 12);
+});
+
+test("subset selection precedes independent block shuffles", () => {
+  const keys = [];
+  sequentialSchedule(3, IDS, (key, array) => (keys.push(key), array), 6);
+  assert.deepEqual(keys, ["schedule-target-subset", "schedule-block-0", "schedule-block-1", "schedule-block-2"]);
+});
+
+test("invalid subset sizes fail explicitly", () => {
+  for (const count of [0, -1, 13, 2.5]) {
+    assert.throws(() => sequentialSchedule(3, IDS, seededShuffle("test"), count), RangeError);
+  }
+});
+
 // ---- Idle detection -----------------------------------------------------------------------------
 
 // One timed-out round, seen from each side. The director sent `d` messages, the matcher `m`.

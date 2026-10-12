@@ -132,8 +132,9 @@
     //   • A round counter and running score shown throughout (`newRoundUpdate`).
     //
     // Differs from the original:
-    //   1. 36 rounds instead of 72. Each tangram appears three times as a target in a balanced
-    //      schedule, but participants play one continuous sequence of trials.
+    //   1. 18 rounds instead of 72: three blocks of six targets, played without breaks. A shared
+    //      shuffle selects six of the twelve tangrams per dyad; each is targeted once per block.
+    //      All twelve tangrams remain visible on every trial.
     //   2. `round_timeout` (60s). The original ran untimed. The timeout ends a round when a player
     //      stays connected but never acts; timed-out rounds have `multiplayer_outcome: "timeout"`.
     //   3. Gate semantics. The original sets `messageSent` on ANY chat message, including the
@@ -150,9 +151,10 @@
     const MIN_PLAYERS = 2;
 
     const CONFIG = {
-      PILOT_LABEL: "hawkins-36-trial-paid-pilot",
+      PILOT_LABEL: "hawkins-18-trial-paid-pilot",
       BLOCKS: 3,
       COMPREHENSION_CHECK: true,
+      TARGETS_PER_BLOCK: 6, // random subset per dyad; all 12 shapes remain visible
       // Replace these placeholders with real Prolific codes before the paid run. The placeholder
       // allows testing the redirect, but is not a valid Prolific completion code.
       COMPLETION_CODES: {
@@ -236,6 +238,7 @@
       config_blocks: CONFIG.BLOCKS,
       config_comprehension_check: CONFIG.COMPREHENSION_CHECK,
       config_preparation_timeout_ms: CONFIG.PREPARATION_TIMEOUT_MS,
+      config_targets_per_block: CONFIG.TARGETS_PER_BLOCK,
       config_n_stimuli: SHAPES.length,
       config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
       viewport_w: window.innerWidth,
@@ -277,7 +280,7 @@
         interrupted_at_round: interruptedAtRound,
         n_trials_completed: completed,
         n_trials_scheduled: SCHEDULE.length,
-        blocks_completed: Math.floor(completed / SHAPES.length),
+        blocks_completed: Math.floor(completed / CONFIG.TARGETS_PER_BLOCK),
       };
       jsPsych.data.addProperties(outcome);
     }
@@ -348,7 +351,7 @@
       };
     }
 
-    const totalRounds = CONFIG.BLOCKS * SHAPES.length;
+    const totalRounds = CONFIG.BLOCKS * CONFIG.TARGETS_PER_BLOCK;
     const roundSeconds = Math.round(CONFIG.ROUND_TIMEOUT_MS / 1000);
     const generalInstructions = continueScreen(
       `<h2>How this study works</h2>
@@ -952,9 +955,13 @@
         CONFIG.BLOCKS,
         SHAPES.map((s) => s.id),
         (key, array) => jsPsych.multiplayer.shuffle(key, array),
+        CONFIG.TARGETS_PER_BLOCK,
       );
       gameLoop.timeline_variables = SCHEDULE;
-      jsPsych.data.addProperties({ config_trials: SCHEDULE.length });
+      jsPsych.data.addProperties({
+        config_trials: SCHEDULE.length,
+        assigned_target_ids: SCHEDULE.slice(0, CONFIG.TARGETS_PER_BLOCK).map((trial) => trial.targets[0]).sort(),
+      });
 
       await jsPsych.run([
         preloadTrial,
