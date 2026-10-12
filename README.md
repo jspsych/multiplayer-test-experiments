@@ -3,6 +3,8 @@
 Matcher-owned coordination is an opt-in review prototype on this branch. See
 [design and acceptance](ROUND-COORDINATION.md) and
 [evidence, limitations and operator checks](COORDINATION-EVIDENCE.md).
+The [authorized MindProbe validation](COORDINATION-MINDPROBE-VALIDATION.md) records
+the tested JATOS full run and frozen-matcher failure.
 The documented `?coordination=matcher&mp_session=...` URL disables DataPipe for
 synthetic local testing; the default pilot page retains its existing configuration.
 

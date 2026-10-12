@@ -1,5 +1,10 @@
 # Prototype evidence, limitations and operator checks
 
+Follow-up: the operator subsequently completed local checks, and explicitly
+authorized the [MindProbe browser validation](COORDINATION-MINDPROBE-VALIDATION.md).
+That report records the passing full run, delay/race checks and frozen matcher;
+the pending items below describe the state when this initial evidence record was written.
+
 ## What is implemented
 
 Opt-in matcher coordination is in `round-coordinator.js` and the pinned-plugin
