@@ -2,7 +2,7 @@
 
 ## Current combined preview — 2026-10-14
 
-The refreshed preview also copies PR #40 (`57ee58b5c5622dff89fd91552da326159c55d762`)
+The refreshed preview also copies PR #40 (`11b10ca6bb733c627754da3b687b8b91960593db`)
 and PR #41 (`c7ef78fa395a67eb40bfe52b6fc7b4a79e551dd2`): gameplay clarity,
 the role-specific walkthrough and two paired practice rounds using excluded targets.
 PR #39 restores the original #38 packet at `a7e87a4`; its changes were already
@@ -11,6 +11,9 @@ The feature changes are copied into a new integration commit, not merged with
 their original histories. Do not point review PRs at this preview or merge their
 heads into it. Subsequent refreshes should likewise copy changes without moving
 the review base branches.
+This refresh also copies PR #34's symmetric "in this round" message-gate choices
+(`7121b75d0bc79ca89ee8a5ecd78ec04202f75fae`) and PR #40's conversation heading
+and empty-state hint. The hint is outside the message log and never enters transcripts.
 
 The archive still enables coordination and the test DataPipe experiment. It now
 includes the presentation/onboarding helpers, two practice rounds and 18 main
@@ -36,18 +39,18 @@ produces an isolated archive with DataPipe disabled.
 | #30 | 25817a7762ce5bfa874c628cef471ec32c9e86dd |
 | #31 | 61b85e4b41111bd8fa12166429a154ae42fadcc6 |
 | #32 | 173cbac7e3cbaeaac03df1fb16c25f0dbd2a5c41 |
-| #34 | c47f92aef4f4b656a4aa2ebdc0b7a21a203b28c3 |
+| #34 (wording copied) | 7121b75d0bc79ca89ee8a5ecd78ec04202f75fae |
 | #35 | 3016dcff4d301c1f481a722162b710fbfc8a704e |
 | #36 | bd1638ee56722956c16dd91551ee5a302aa3d622 |
 | #37 | 56aa191687be80327121bafe6a37a6d21c2e0414 |
 | #39 (restores #38) | a7e87a405454b405a2bca60bf280b9a60ff65833 |
-| #40 (copied) | 57ee58b5c5622dff89fd91552da326159c55d762 |
+| #40 (copied) | 11b10ca6bb733c627754da3b687b8b91960593db |
 | #41 (copied) | c7ef78fa395a67eb40bfe52b6fc7b4a79e551dd2 |
 
 The PR #37 merge preserves the newer PR #38 implementations in overlapping
 page, analysis, packaging and session-test changes. Its reminder focus behavior
 was already present in PR #38 and is retained. The nine earlier source heads are
-ancestors of the preview. The #40/#41 heads are not ancestors: their patches were
+ancestors of the preview. The updated #34 and #40/#41 heads are not ancestors: their patches were
 copied to preserve independent PR review. This combined configuration is a testing
 choice, not authorization to merge the PRs into main.
 
@@ -63,14 +66,24 @@ failure saving/routing and archive checks for coordination plus configured DataP
 Vendor files were SHA-verified against the pinned public-prototype manifest and
 the source patch hash before packaging. All 16 pinned-plugin DOM simulations passed,
 covering selection, timeout, phase delays, interruption and multi-round behavior.
-These simulations do not run the page's DataPipe upload. Real DataPipe uploads and
-JATOS saving have not yet been verified for the refreshed practice/walkthrough archive.
+These simulations do not run the page's DataPipe upload. The requester confirmed
+that both result JSONs from the prior preview (`3152725`) were downloaded from
+Google Drive through DataPipe. Executable checks of those files found 33 rows each,
+one dyad (session 133), two distinct roles, seven walkthrough steps each, two
+practice targets H/K excluded from the main set, and 18 completed main rounds.
+Choices, authoritative results, transcripts and phase/round IDs agree, with no
+coordination failures. This confirms the normal JATOS-gameplay-to-DataPipe-to-Drive
+path for that dyad. JATOS result-store readback remains unverified. The current
+refresh changes wording and chat labels, not the saving implementation.
 The refreshed integration page passed a fresh two-tab headless Chrome smoke using
 the same full shared `?mp_session=` URL: walkthrough completion, two practice and
 18 main rounds, unique protocol IDs, excluded practice targets, phase-specific
 progress/score, main-only terminal counts, and no JavaScript exceptions. External
 HTTPS requests were blocked, so this checks gameplay and failure handling for an
 unavailable upload destination, not successful DataPipe saving.
+The wording/chat refresh also passed the full two-tab completion smoke, with
+conversation headings present for both roles, hints visible before each round's
+first message, hidden afterward, and no hint text inserted into message history.
 
 Operator test: import `test.jzip`, use the same JATOS study link for two workers,
 complete the walkthrough, two practice rounds and 18 main rounds, and compare both JATOS results and the linked Drive

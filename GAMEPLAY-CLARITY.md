@@ -11,7 +11,9 @@ The cumulative display includes the current accepted correct choice without coun
 repeated state notifications twice. Existing role-specific shape highlights remain.
 
 Chat has a persistent label, role-specific help, a stronger input border/focus outline,
-and an emphasized Send button. A shared presentation helper is packaged into JATOS.
+and an emphasized Send button. The message history has its own persistent
+"Conversation with your partner" heading and an empty-state hint that disappears
+as soon as messages arrive. A shared presentation helper is packaged into JATOS.
 No stimulus geometry, response gate, transport, saving or study schedule is changed.
 
 Verification: 60 repository tests passed. A fresh two-tab headless Chrome session

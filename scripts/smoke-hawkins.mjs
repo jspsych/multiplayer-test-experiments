@@ -104,6 +104,14 @@ try {
       if (identity !== lastRound || !savedScreens) {
         assert(snapshots.every(s => s.input), 'Chat labels missing');
         for(const page of pages) {
+          const conversation = await page.eval(`({ heading: document.getElementById('hk-conversation-title')?.textContent,
+            empty: getComputedStyle(document.querySelector('.hk-conversation-empty')).display,
+            messages: document.querySelectorAll('.jspsych-multiplayer-reference-game-chat-message').length })`);
+          assert.equal(conversation.heading, 'Conversation with your partner');
+          assert.equal(conversation.messages, 0);
+          assert.equal(conversation.empty, 'block');
+        }
+        for(const page of pages) {
           const progress = await page.eval(`(() => {
             const phase = jsPsych.evaluateTimelineVariable('phase');
             const index = jsPsych.evaluateTimelineVariable('phase_round');
@@ -122,6 +130,13 @@ try {
         const mode = exerciseTimeout && results.length === 0 ? 'incorrect' : exerciseTimeout && results.length === 1 ? 'timeout' : 'correct';
         await pages[director].eval(`(() => { const input = document.querySelector('.jspsych-multiplayer-reference-game-chat-input'); input.value = 'Test description'; input.form.requestSubmit(); })()`);
         await pause(200);
+        for(const page of pages) {
+          const conversation = await page.eval(`({ empty: getComputedStyle(document.querySelector('.hk-conversation-empty')).display,
+            log: document.querySelector('.jspsych-multiplayer-reference-game-chat-log').textContent })`);
+          assert.equal(conversation.empty, 'none');
+          assert(conversation.log.includes('Test description'));
+          assert(!conversation.log.includes('Messages you and your partner send will appear here.'));
+        }
         if (mode !== 'timeout') await pages[matcher].eval(mode === 'incorrect'
           ? `[...document.querySelectorAll('[data-object-id]')].find(e => e.dataset.objectId !== '${target}')?.click()`
           : `document.querySelector('[data-object-id="${target}"]')?.click()`);

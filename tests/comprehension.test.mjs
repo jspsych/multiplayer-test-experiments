@@ -40,7 +40,7 @@ test("comprehension retries preserve attempts, save answers, and release only af
   answerTrial.on_finish();
   assert.equal(row.comprehension_passed, true);
   assert.equal(row.comprehension_attempt, 2);
-  assert.equal(row.response.click_gate, "After the Director sends a message in that round");
+  assert.equal(row.response.click_gate, "After the Director sends a message in this round");
   check.timeline[1].func(() => {});
   assert.match(display.innerHTML, /ready to wait for a partner/);
   assert.equal(check.loop_function(), false);

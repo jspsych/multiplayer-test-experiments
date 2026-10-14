@@ -11,6 +11,21 @@
   function chat(display, role) {
     const input = display.querySelector(`${P}-chat-input`);
     if (!input || display.querySelector('.hk-chat-label')) return;
+    const log = display.querySelector(`${P}-chat-log`);
+    if (log) {
+      const heading = document.createElement('h2');
+      heading.id = 'hk-conversation-title'; heading.className = 'hk-chat-label';
+      heading.textContent = 'Conversation with your partner';
+      log.before(heading);
+      log.setAttribute('aria-labelledby', heading.id);
+      const conversation = document.createElement('div');
+      conversation.className = 'hk-conversation';
+      log.before(conversation); conversation.append(log);
+      const empty = document.createElement('p');
+      empty.className = 'hk-conversation-empty';
+      empty.textContent = 'Messages you and your partner send will appear here.';
+      conversation.append(empty);
+    }
     input.id = 'hk-chat-input';
     input.setAttribute('aria-describedby', 'hk-chat-help');
     const label = document.createElement('label');
