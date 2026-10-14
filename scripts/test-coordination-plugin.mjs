@@ -142,6 +142,7 @@ async function scenario({ timeout = false, incorrect = false, delayedEntry = fal
   } else if (disconnect || reload || cancel) {
     if (disconnect) { clients.d.presence.m = "left"; clients.d.notify("session"); }
     if (reload) { clients.d.api.restarted = true; clients.d.notify("session"); }
+    // Simulates the coordinator's rejected session wait, not direct core abortExperiment().
     if (cancel) for (const reject of clients.d.waits) reject(Object.assign(new Error("cancelled"), { name: "MultiplayerError", code: "cancelled" }));
     await drain(); await advance(100);
   } else if (timeout) {

@@ -11,7 +11,7 @@ const upstream = path.join(root, ".build/public");
 const normalizedCore = Buffer.from(fs.readFileSync(path.join(upstream, "vendor/jspsych/dist/index.browser.min.js"), "utf8").replace(/\n?\/\/# sourceMappingURL=\S+\s*$/, "\n"));
 if (digest(normalizedCore) !== digest(read("vendor/jspsych.js"))) throw Error("Core differs from exported public pin");
 const pinnedCoreVerified = true;
-if (manifest.multiplayer_commit !== "044ae08c9fa149c375b8c32e55bb7a90d2b3f34b" ||
+if (manifest.multiplayer_commit !== "193f95ca2df494692219c0616d6448a52f39013f" ||
     manifest.jspsych_preview !== "1e77da41966f22832ee0d133d137d81b3e50639a" ||
     manifest.upstream_patch.sha256 !== digest(read("patches/public-result-context.patch"))) throw Error("Unexpected dependency/patch pins");
 for (const [file, hash] of Object.entries(manifest.source_hashes)) {
@@ -25,7 +25,7 @@ for (const [index, match] of [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\
   new vm.Script(match[1], { filename: `inline-${index}.js` });
 }
 fs.mkdirSync(path.join(root, "dist"), { recursive: true });
-const archive = "dist/hawkins-public-round-coordination.jzip";
+const archive = process.env.JZIP_OUT ?? "dist/hawkins-public-round-coordination.jzip";
 execFileSync(process.execPath, ["scripts/make-jzip.mjs"], { cwd: root, stdio: "inherit",
   env: { ...process.env, COORDINATION_PROTOTYPE: "1", JZIP_OUT: archive } });
 const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();

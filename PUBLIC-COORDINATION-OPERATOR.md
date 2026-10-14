@@ -3,9 +3,10 @@
 Manual replacement browser checks were completed on 2026-10-13; see
 [the browser evidence record](PUBLIC-COORDINATION-BROWSER-EVIDENCE.md) for
 coverage and remaining checks. Replacement MindProbe checks remain pending.
-The frozen facade's successful MindProbe run does not validate these assets. No browser automation,
-import/deploy, worker run, administrative operation or DataPipe upload was done
-for this packet. The old JATOS runner is disabled here; the frozen runner remains
+The frozen facade's successful MindProbe run does not validate these assets. The
+initial handoff included no browser automation, import/deploy, worker run,
+administrative operation or DataPipe upload; subsequent local smoke checks are
+recorded below. The old JATOS runner is disabled here; the frozen runner remains
 in its comparison worktree. New automation requires explicit session authorization.
 
 ## Source and local preparation
@@ -25,7 +26,7 @@ node scripts/test-coordination-plugin.mjs C:/Users/hanna/Documents/multiplayer/m
 node scripts/stage-public-source.mjs C:/Users/hanna/Documents/multiplayer/jspsych-multiplayer/.worktrees/matcher-round-coordination --verify
 ```
 
-Vendor exports public `044ae08c9fa149c375b8c32e55bb7a90d2b3f34b`, applies the
+Vendor exports public `193f95ca2df494692219c0616d6448a52f39013f`, applies the
 reviewable [utils context patch](patches/public-result-context.patch), builds
 packages, and uses that pin's vendored core preview
 `1e77da41966f22832ee0d133d137d81b3e50639a`. It reuses only SHA-verified frozen
@@ -139,7 +140,7 @@ full-game and fault comparisons and retain raw data locally. Real adapters, brow
 scheduling, saves under failure and independent server readback remain unvalidated.
 Do not merge or treat this as paid-launch readiness.
 
-## Executable evidence
+## Initial executable evidence (older upstream pin)
 
 - Patched upstream full suite: **867 tests, 27 suites passed**. First run had the
   existing Windows CRLF Firebase README regex failure; local LF normalization
@@ -152,8 +153,35 @@ Do not merge or treat this as paid-launch readiness.
   progression run with two ordinary timeouts, correct/incorrect selection, gating,
   raw submissions/scoring, description attribution, reminder response/miss/pause,
   delayed entry/feedback/result, missing readiness, frozen matcher, departure,
-  restart indication, cancellation and accepted-result feedback failures.
+  restart indication, simulated session-wait cancellation and accepted-result feedback failures.
 - Fresh pinned export plus source patch exactly reproduces checked build sources;
   vendor/source/core hashes, inline syntax and archive structure are checked by
   preparation and tests. These are simulations and source checks, not browser or
   MindProbe validation. See [asset record](PUBLIC-COORDINATION-ASSETS.json).
+
+## Upstream review follow-up
+
+The dependency now includes upstream's nonfinite-number submission guard (`193f95c`).
+The context patch still applies without modification. Previous browser/archive
+evidence above describes the older pin; it is not validation of the rebuilt packet.
+Use a fresh `JZIP_OUT` when preparing another archive to preserve earlier artifacts.
+The updated source, dependency and archive hashes are recorded separately in
+[the repin asset record](PUBLIC-COORDINATION-ASSETS-193f95c.json).
+
+Validation of this repin: full dependency build passed; all 36 patched upstream
+coordinator tests, 56 experiment tests and 16 paired built-plugin DOM scenarios
+passed. A two-tab headless Chrome smoke check using a fresh full shared
+`?coordination=matcher&mp_session=...` URL completed three correct selections,
+preserving the director-message gate, identical results/context, feedback and
+progression. These checks do not establish real JATOS saving or direct core
+cancellation support. The earlier full manual browser run was not repeated.
+
+The harness's cancellation scenario rejects a simulated session wait; it does not
+call `jsPsych.abortExperiment()` on an actual timeline. Direct core cancellation
+can finish a trial before the coordinator saves assignment, scoring, result and
+failure fields, even after an accepted result. This limitation remains unresolved
+in [upstream issue #118](https://github.com/jspsych/jspsych-multiplayer/issues/118).
+Hawkins currently saves the finished round and calls `abortCurrentTimeline()` from
+its `on_finish` handler; it does not directly abort an active experiment. Before
+adding such a cancellation control, require actual-timeline coverage and a supported
+synchronous finalization path. No cancellation wrapper is introduced here.

@@ -1,0 +1,115 @@
+{
+  "frozenComparisonHead": "bf82c22",
+  "combinedBaseline": "21a73451579782acc44d8946a466a0829bb0f261",
+  "baseline": "3563868a671d37ca429314d3c2b73c712b0c77b7",
+  "addedPRHeads": {
+    "36": "bd1638ee56722956c16dd91551ee5a302aa3d622",
+    "37": "f61d1263cfe21e7e707bc679e11f87a6fe5fafcd"
+  },
+  "sourceStatus": "M PUBLIC-COORDINATION-INTEGRATION.md\n M PUBLIC-COORDINATION-OPERATOR.md\n M scripts/prepare-coordination.mjs\n M scripts/stage-public-source.mjs\n M scripts/test-coordination-plugin.mjs\n M scripts/vendor.mjs",
+  "sourceHashes": {
+    "reference-game-hawkins.html": "1b3d086d066edade244e745d0a9508f72d63ea88ce268bb44bb155035492642f",
+    "hawkins-coordination.js": "471daba147f768052928a9cb4b37ecd127e788636cb6e6bddd409ab18097d818",
+    "patches/public-result-context.patch": "b5725d1980ee6e1b67d620e7be858b8fc843db04807db7dae21699a04987ec1a",
+    "hawkins.js": "1f7d232080b0533de42c08ce7e35f45b75d230b93bb7e8dfbcf75d9c6a1da621",
+    "presence-check.js": "157c850dda6a779fda4bf3b1c38eb11ad922e94dae89d3c3e11b73e99aed3171",
+    "tangrams.js": "75aa2b963a0bf588159cc230ca534964d89eea2b36a644aece2c6ac7ccbcdfdd",
+    "scripts/make-jzip.mjs": "2a8a56a10a75ea338e7b79ac27083d1e2de3ab08136d557d4af3750188c070ac",
+    "scripts/prepare-coordination.mjs": "65072e04b002514f783f0634079b2a11cffd754429e7c0af9ab11a0e4cbb907f",
+    "scripts/vendor.mjs": "27acf7cf73dddca29960c1771f4fa87d5c08b1e41e74d5847c510cc462a8ca84",
+    "scripts/stage-public-source.mjs": "bc007f8676377bb18e846112bc3ac5821e31ebcf667fa66f078a6ff7d4b57168",
+    "scripts/verify-public-source.mjs": "615b20a826f2efa5688dadea6d9b09b421fb4b50c0fe752ef32a77405038310a",
+    "scripts/test-coordination-plugin.mjs": "46828a7e8f6687f6f3910369a40b0789107974d81fbeb738abc9204c2f95c718",
+    "vendor/manifest.json": "69a72d2fece17658a4ff0d9ca7a8e8d666c825fff20fb81d789e9d913218fca9"
+  },
+  "dependencies": {
+    "multiplayer_commit": "193f95ca2df494692219c0616d6448a52f39013f",
+    "upstream_patch": {
+      "file": "patches/public-result-context.patch",
+      "sha256": "b5725d1980ee6e1b67d620e7be858b8fc843db04807db7dae21699a04987ec1a"
+    },
+    "source_hashes": {
+      "package-lock.json": "aabd80559cdaab490ad0b5481f2f82ae6892fd34ac9db02beb2ec49382013614",
+      "packages/utils/src/round-coordinator.ts": "703705da6012f64722007e4d53b6a608ddef83052bf14ac03a6637af00627397",
+      "packages/plugin-multiplayer-reference-game/src/index.ts": "4be34dd2e490058e08d91590fd08ac8195a18b3c0fc56358f7c5c4579534a8fe",
+      "vendor/jspsych/dist/index.js": "c360ac23b3dab7545d473a832f0df89c4a8611d9e95617793690278f0132d79d"
+    },
+    "jspsych_preview": "1e77da41966f22832ee0d133d137d81b3e50639a",
+    "jspsych_plugins": {
+      "plugin-html-keyboard-response": "2.2.0",
+      "plugin-preload": "2.1.0",
+      "plugin-call-function": "2.1.0"
+    },
+    "pipe_extension_version": "0.2.0",
+    "files": {
+      "jspsych.js": {
+        "source": "jspsych/jspsych-multiplayer@193f95ca2df494692219c0616d6448a52f39013f vendor/jspsych/dist/index.browser.min.js",
+        "sha256": "62bc22ab7aa5418bc6e81880a5acd0fe9d135a067e88f131d99611b930bbcf77"
+      },
+      "jspsych.css": {
+        "source": "jspsych/jspsych-multiplayer@193f95ca2df494692219c0616d6448a52f39013f vendor/jspsych/css/jspsych.css",
+        "sha256": "1761ad55163ef1bf0062148597c0206fb711986257a5a732527a4c705bf73e52"
+      },
+      "plugin-html-keyboard-response.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/plugin-html-keyboard-response@2.2.0/dist/index.browser.min.js",
+        "sha256": "8c9ab47cfd8f53f6481fa553b5dde4ac03d4797d47c8ffccfa8d4371b459a97e"
+      },
+      "plugin-preload.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/plugin-preload@2.1.0/dist/index.browser.min.js",
+        "sha256": "01588e1a9b9cc16b1e22df1ea0c6c1be6c9b284cc005d5e82ac5997ce6aad918"
+      },
+      "plugin-call-function.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/plugin-call-function@2.1.0/dist/index.browser.min.js",
+        "sha256": "7be9ca82020ac30f8a5943a3a5a281c52954936965daa7a67e0606455466a6fb"
+      },
+      "extension-pipe.js": {
+        "source": "https://cdn.jsdelivr.net/npm/@jspsych/extension-pipe@0.2.0/dist/index.browser.min.js",
+        "sha256": "4e440eec85172e93654280734837ba5185c45a947f075b339a8daa746c09db50"
+      },
+      "utils.js": {
+        "source": "jspsych/jspsych-multiplayer@193f95ca2df494692219c0616d6448a52f39013f + patches/public-result-context.patch packages/utils/dist/index.browser.min.js",
+        "sha256": "72e19e5211ce0f42087b30cdb338deedd0b013ce35c767fde54a9bbe49f3c60b"
+      },
+      "adapter-multiplayer-local.js": {
+        "source": "jspsych/jspsych-multiplayer@193f95ca2df494692219c0616d6448a52f39013f + patches/public-result-context.patch packages/adapter-multiplayer-local/dist/index.browser.min.js",
+        "sha256": "1b71d3f30c97cb611fbb0e623d10438b99aad9c59853f53b0505f679ca958b27"
+      },
+      "adapter-multiplayer-jatos.js": {
+        "source": "jspsych/jspsych-multiplayer@193f95ca2df494692219c0616d6448a52f39013f + patches/public-result-context.patch packages/adapter-multiplayer-jatos/dist/index.browser.min.js",
+        "sha256": "03bd2e18dfadebda3d55d71f49e42c17c886b8b5a976beb2c1e75a0092f0db92"
+      },
+      "plugin-multiplayer-role.js": {
+        "source": "jspsych/jspsych-multiplayer@193f95ca2df494692219c0616d6448a52f39013f + patches/public-result-context.patch packages/plugin-multiplayer-role/dist/index.browser.min.js",
+        "sha256": "559cd5b93cc6f3020a0e3fb6f554743de2acede4a4ccdb274febb31079a5de3f"
+      },
+      "plugin-multiplayer-reference-game.js": {
+        "source": "jspsych/jspsych-multiplayer@193f95ca2df494692219c0616d6448a52f39013f + patches/public-result-context.patch packages/plugin-multiplayer-reference-game/dist/index.browser.min.js",
+        "sha256": "140dff1f69c6bb7d3ef633fe53bf6bc30c2b7ba1308be0019013e5f0b52de178"
+      }
+    }
+  },
+  "archive": "dist/hawkins-public-round-coordination-193f95c.jzip",
+  "archiveSha256": "2d641588345129dd72bca3c9192dac032dca603735686daad24006f1bc276f75",
+  "pinnedCoreVerified": true,
+  "archiveOverrides": {
+    "MATCHER_COORDINATION": true,
+    "DATAPIPE_EXPERIMENT_ID": ""
+  },
+  "browserValidated": false,
+  "jatosValidated": false,
+  "sourceBase": "42e530f9039130deb30a5f276eb0ae20718e72ce",
+  "note": "Source base plus repin changes identified by sourceHashes; original asset record and archive retained. Browser validation flag refers to full operator coverage, not the focused smoke check.",
+  "validation": {
+    "dependencyBuild": true,
+    "upstreamCoordinatorTests": 36,
+    "experimentTests": 56,
+    "pairedDomScenarios": 16,
+    "localTwoTabSmoke": {
+      "rounds": 3,
+      "gate": true,
+      "pairedResultsAndContext": true,
+      "feedbackAndProgression": true
+    },
+    "directAbortExperimentTested": false
+  }
+}

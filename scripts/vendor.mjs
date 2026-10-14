@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Public prototype PR #117, plus the recorded minimal authority-context patch.
-const MULTIPLAYER_COMMIT = "044ae08c9fa149c375b8c32e55bb7a90d2b3f34b";
+const MULTIPLAYER_COMMIT = "193f95ca2df494692219c0616d6448a52f39013f";
 // The jsPsych#3694 preview build that commit's examples and vendored core are pinned to.
 const JSPSYCH_PREVIEW = "1e77da41966f22832ee0d133d137d81b3e50639a";
 const JSPSYCH_PLUGINS = {

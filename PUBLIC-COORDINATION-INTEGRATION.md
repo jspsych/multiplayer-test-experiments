@@ -88,3 +88,12 @@ full progression, delayed entry, frozen matcher and delayed feedback checks,
 including accepted selection/timeout preservation. The pending browser statements
 above describe the original implementation handoff. Remaining manual coverage and
 replacement JATOS validation are listed in the subsequent record.
+
+## Upstream review follow-up
+
+The current build pin is `193f95ca2df494692219c0616d6448a52f39013f`, adding the
+upstream nonfinite-number guard while retaining the same context patch and core.
+See the [updated operator record](PUBLIC-COORDINATION-OPERATOR.md#upstream-review-follow-up)
+for validation, new hashes and the distinction between coordinator cancellation
+and direct `abortExperiment()` calls. Earlier pins and archive hashes above remain
+historical evidence.

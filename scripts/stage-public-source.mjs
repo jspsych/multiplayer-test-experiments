@@ -12,7 +12,7 @@ if (!verify && fs.existsSync(dest)) throw Error('Build source exists; preserve i
 try {
   fs.mkdirSync(dest, { recursive: true });
   const archive = execFileSync('git', ['-c', `safe.directory=${checkout.replaceAll('\\', '/')}`, '-C', checkout,
-    'archive', '044ae08c9fa149c375b8c32e55bb7a90d2b3f34b'], { maxBuffer: 40 * 1024 * 1024 });
+    'archive', '193f95ca2df494692219c0616d6448a52f39013f'], { maxBuffer: 40 * 1024 * 1024 });
   execFileSync('tar', ['-xf', '-', '-C', dest], { input: archive });
   execFileSync("git", ["apply", "--no-index", path.join(root, "patches/public-result-context.patch")], { cwd: dest });
   if (verify) {
