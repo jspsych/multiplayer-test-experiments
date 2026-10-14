@@ -55,8 +55,10 @@ The archive includes `build-info.json` with its source commit, build time,
 packaging profile and SHA-256 hashes of source/assets. The archive commit follows
 the source commit recorded inside it. Only `test.jzip` is exempted from the archive
 ignore rule; raw participant/test datasets remain outside the commit.
+The default `npm run jzip` deliberately refreshes this tracked preview. Other
+named archives and the disposable prototype profile retain overwrite protection.
 
-Verification: `npm test` passed all 67 tests, including countdown, coordination
+Verification: `npm test` passed all 68 tests, including countdown, coordination
 failure saving/routing and archive checks for coordination plus configured DataPipe.
 Vendor files were SHA-verified against the pinned public-prototype manifest and
 the source patch hash before packaging. All 16 pinned-plugin DOM simulations passed,

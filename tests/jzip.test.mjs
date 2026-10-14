@@ -68,6 +68,15 @@ test("the archive's end record counts every entry", { skip: !hasVendor && "run s
   for (const img of ["A", "L"]) assert.ok(entries.has(`${dir}/assets/tangrams/tangram_${img}.png`));
 });
 
+test("named archives are preserved if packaging is repeated", { skip: !hasVendor && "run scripts/vendor.mjs" }, () => {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "preserve-jzip-")), "study.jzip");
+  const options = { cwd: REPO, env: { ...process.env, JZIP_OUT: out }, stdio: "pipe" };
+  execFileSync("node", ["scripts/make-jzip.mjs"], options);
+  const original = fs.readFileSync(out);
+  assert.throws(() => execFileSync("node", ["scripts/make-jzip.mjs"], options), /Archive exists/);
+  assert.deepEqual(fs.readFileSync(out), original);
+});
+
 test("disposable coordination archive forces coordination and disables configured DataPipe", { skip: !hasVendor && "run scripts/vendor.mjs" }, () => {
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "coordination-jzip-")), "study.jzip");
   execFileSync("node", ["scripts/make-jzip.mjs"], { cwd: REPO,

@@ -268,7 +268,9 @@ if (new Set(roots).size !== 2) {
 }
 
 const outPath = path.resolve(REPO, OUT_NAME);
-if (fs.existsSync(outPath)) throw new Error("Archive exists; choose a fresh JZIP_OUT to preserve it");
+// The tracked integration preview is intentionally refreshed. Keep other named archives frozen.
+if (fs.existsSync(outPath) && (OUT_NAME !== "test.jzip" || COORDINATION_PROTOTYPE))
+  throw new Error("Archive exists; choose a fresh JZIP_OUT to preserve it");
 fs.writeFileSync(outPath, writeZip(entries));
 console.log(`wrote ${OUT_NAME} (${entries.length} entries)`);
 console.log(`study: "${STUDY_TITLE}" | assets dir: ${DIR_NAME}/ | entry: ${ENTRY_HTML}`);
