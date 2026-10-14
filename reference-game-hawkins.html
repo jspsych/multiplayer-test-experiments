@@ -36,6 +36,9 @@
       #hk-time-hint { min-height: 1.3em; font-weight: bold; }
       .hk-chat-label { display: block; text-align: left; font-size: 20px; font-weight: bold; margin-top: 16px; }
       .hk-chat-help { text-align: left; margin: 4px 0 8px; font-size: 16px; }
+      .hk-conversation { position: relative; }
+      .hk-conversation-empty { display: none; position: absolute; top: 12px; left: 14px; right: 14px; margin: 0; color: #58606b; font-size: 16px; text-align: left; pointer-events: none; }
+      .hk-conversation .jspsych-multiplayer-reference-game-chat-log:empty + .hk-conversation-empty { display: block; }
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-input { border: 2px solid #315c9e; border-radius: 6px; padding: 12px; font-size: 18px; background: #fff; }
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-input:focus { outline: 3px solid #90b5ec; outline-offset: 2px; }
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-send { padding: 12px 20px; font-weight: bold; background: #234f90; color: white; border-radius: 6px; }
