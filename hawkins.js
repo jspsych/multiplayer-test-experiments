@@ -33,9 +33,9 @@
   // Which role let a timed-out round run out, or null if the round did not time out.
   //
   // The director must send a message before the matcher can click, so a timeout means either the
-  // director never sent one, or the director did and the matcher never clicked. Both players see
-  // the director's messages, so both reach the same answer from their own round data. That is the
-  // point: counting only "my partner was silent" makes the idle player blame the attentive one.
+  // director description was not observed locally, or was observed without a selection.
+  // Local counts can differ while messages are in transit. Coordinated mode uses the
+  // committed matcher observation for attribution and preserves this local estimate separately.
   function idleRole(data) {
     if (data.multiplayer_outcome !== "timeout") return null;
     const sent = data.messages_sent ?? 0;
@@ -44,25 +44,37 @@
     return directorMessages > 0 ? "matcher" : "director";
   }
 
-  // Counts consecutive timed-out rounds idled by the same role. `record` returns that role once it
-  // reaches `limit`, and null otherwise. A completed round, or a timeout idled by the other role,
-  // starts the count again.
-  function createIdleTracker(limit) {
-    let role = null;
-    let count = 0;
-    return {
-      record(data) {
-        const idle = idleRole(data);
-        if (idle === null) {
-          role = null;
-          count = 0;
-          return null;
-        }
-        count = idle === role ? count + 1 : 1;
-        role = idle;
-        return count >= limit ? role : null;
-      },
+  // Fields merged into each reference-game row so analysis can tell a wrong pick from a round
+  // nobody finished. `round_result` is "correct", "incorrect", "timeout", or the plugin's outcome
+  // for a round cut short ("participant_left", "connection_lost", ...); `idle_role` says who did
+  // not act in a timeout. `selection_timeout` scores a timed-out round as an empty, wrong answer
+  // with the deadline as its rt, so those fields are reset to null: a timeout must never count as
+  // an incorrect selection or a response time.
+  function classifyRound(data) {
+    const sent = data.messages_sent ?? 0;
+    const received = (data.message_count ?? 0) - sent;
+    const isDirector = data.role === "director";
+    const outcome = data.multiplayer_outcome;
+    const fields = {
+      round_result:
+        outcome === "completed" ? (data.correct ? "correct" : "incorrect") : outcome ?? null,
+      timed_out: outcome === "timeout",
+      idle_role: data.coordination_result?.kind === "timeout"
+        ? (data.coordination_result.context.directorDescribed ? "matcher" : "director")
+        : idleRole(data),
+      ...(data.coordination_round_id ? { local_idle_role: idleRole(data),
+        coordination_interrupted: Boolean(data.coordination_failure) } : {}),
+      selection_made: data.assignment != null,
+      director_messages: isDirector ? sent : received,
+      matcher_messages: isDirector ? received : sent,
+      matcher_gated_clicks: Array.isArray(data.interaction_history)
+        ? data.interaction_history.filter((e) => e.action === "gated_click").length
+        : null,
     };
+    if (outcome === "timeout") {
+      Object.assign(fields, { correct: null, n_correct: null, accuracy: null, rt: null });
+    }
+    return fields;
   }
 
   // ---- Exit routing ---------------------------------------------------------------------------
@@ -70,8 +82,9 @@
   // Every session ends on exactly one terminal screen. `state` is:
   //   reloaded      true when this page load is a restart of an earlier one (restarted)
   //   noMatchReason set when the participant never got a partner (lobby, pairing, connect errors)
-  //   interruption  set when a game in progress ended early: "partner_left", "connection_lost",
-  //                 "inactive_self" or "inactive_partner"
+  //   interruption  set when a game in progress ended early: "partner_left" or "connection_lost".
+  //                 "inactive_self" and "inactive_partner" are still routed, but the page no longer
+  //                 sets them: timeouts never end the game.
   // Returns the exit name and the completion-code key it pays.
   const EXIT_CODES = {
     reloaded: "reloaded",
@@ -127,7 +140,7 @@
   global.Hawkins = {
     sequentialSchedule,
     idleRole,
-    createIdleTracker,
+    classifyRound,
     exitFor,
     EXIT_CODES,
     createJatosSink,

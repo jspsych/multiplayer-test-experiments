@@ -1,5 +1,18 @@
 # multiplayer-test-experiments
 
+This branch is the public Hawkins coordination integration packet. See
+[design](PUBLIC-COORDINATION-INTEGRATION.md) and [operator checks](PUBLIC-COORDINATION-OPERATOR.md).
+Validation DataPipe is disabled. The frozen facade and MindProbe evidence remain
+in `.worktrees/hawkins-coordination`; they do not validate this replacement.
+
+Matcher-owned coordination is an opt-in review prototype on this branch. See
+[design and acceptance](ROUND-COORDINATION.md) and
+[evidence, limitations and operator checks](COORDINATION-EVIDENCE.md).
+The [authorized MindProbe validation](COORDINATION-MINDPROBE-VALIDATION.md) records
+the tested JATOS full run and frozen-matcher failure.
+The documented `?coordination=matcher&mp_session=...` URL disables DataPipe for
+synthetic local testing; the default pilot page retains its existing configuration.
+
 Standalone, faithful replication builds of published reference-game studies, built on
 [jspsych-multiplayer](https://github.com/jspsych/jspsych-multiplayer) plugins. Ported out of that
 repo's `examples/` (which is meant for lightweight teaching demos, not study artifacts) so these can
@@ -13,6 +26,10 @@ live, version, and be piloted independently.
   handling and data saving. Runs on the local adapter or as a JATOS group study.
 - [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, idle detection, exit
   routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
+- [`presence-check.js`](presence-check.js) — a jsPsych extension on each Hawkins round: after 30s
+  with no mouse, keyboard, scroll or touch activity it asks "Are you still with us?" and waits 15s
+  for a button click. A reminder only: missed prompts are recorded (`presence_*` fields) but never
+  end the round or the game.
 - [`scripts/vendor.mjs`](scripts/vendor.mjs) — fills the gitignored `vendor/` with every script the
   Hawkins page loads, at pinned versions. [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
   the page as a JATOS study archive.
@@ -40,6 +57,10 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 > **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) purely so
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
 > it ends are logged as a timeout (`multiplayer_outcome: "timeout"` in the Hawkins build, `ended_by: "timeout"` in C&WG) with a null assignment, so they're easy to exclude.
+> In the Hawkins build the limit is the matcher's `selection_timeout`: both players see a "Time's up"
+> result and the game moves on. A timed-out row has `round_result: "timeout"`, `correct: null`, and an
+> `idle_role` (`"director"` if no director message arrived, otherwise `"matcher"`). Timeouts never end
+> the game; only a disconnection does.
 
 ## Current pilot direction
 
@@ -64,8 +85,11 @@ should be ported to Hawkins rather than treating C&WG as the first launch target
 
 1. `npm run vendor`, with a [jspsych-multiplayer](https://github.com/jspsych/jspsych-multiplayer)
    checkout at `../jspsych-multiplayer` (or pass its path: `node scripts/vendor.mjs <path>`). This
-   builds the multiplayer bundles at the commit pinned in `scripts/vendor.mjs` and downloads the
-   pinned jsPsych preview build, plugins, and DataPipe Pipe extension into `vendor/`.
+   exports/builds the pinned public source with `patches/public-result-context.patch`.
+   Supply the sibling checkout path explicitly from this nested worktree. It reads the
+   core from that pin and reuses SHA-verified third-party assets from the frozen vendor.
+   Cached build sources are verified against a fresh pinned export plus patch before reuse.
+   See the operator record for exact commands.
 2. Serve the repo over http (e.g. `npx http-server .`) and open the page. It adds `?mp_session=…` to
    the URL.
 3. Open that full URL in exactly one other tab. The two tabs pair, and roles are drawn at random.
@@ -76,13 +100,10 @@ from a single study link and the adapter seals each pair.
 
 ### DataPipe setup for the Hawkins pilot
 
-`CONFIG.DATAPIPE_EXPERIMENT_ID` in `reference-game-hawkins.html` is configured for the Google
-Drive-backed DataPipe experiment `wE2Zlitn0uhu`. This folder was created primarily for testing;
-it may also be used for the main study, pending review. Collaborators are welcome to create their
-own [DataPipe experiment](https://pipe.jspsych.org/getting-started) with Google Drive as its storage
-provider and replace this one configuration value with their dashboard's 12-character experiment ID.
-Local runs also send data to the configured study; set the ID to an empty string to disable
-DataPipe for offline testing. Turn on **Accept new data** in the DataPipe dashboard and verify a completed test run in
+`CONFIG.DATAPIPE_EXPERIMENT_ID` is empty in this validation packet. Coordinated
+mode also disables Pipe before extension setup. Keep it disabled for all replacement
+checks; JATOS saving remains enabled. A later paid-run packet may configure a
+[DataPipe experiment](https://pipe.jspsych.org/getting-started), pending review, and verify a completed test run in
 the linked Drive folder before a paid run. The extension stages each completed trial and submits one
 JSON file when the jsPsych timeline ends; an abandoned run can yield a `.partial.json` file. The
 filename is random and carries no participant identifier. Prolific, participant, and dyad IDs remain
@@ -103,8 +124,10 @@ way the Hawkins build was.
 **Not yet.** [`READINESS.md`](READINESS.md) is the full audit, written before jspsych-multiplayer
 gained session IDs, group formation and rejoin detection, so parts of it are out of date. The Hawkins
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
-randomness, dropout and idle detection with paid exits, reload detection, Prolific IDs and
-completion routing, and saving to JATOS and/or DataPipe. Still open:
-real completion codes are unset in `CONFIG`, a Google Drive test upload and the real JATOS run are outstanding,
+randomness, dropout detection with paid exits, per-round timeout classification (timeouts never end
+the game), reload detection, Prolific IDs and
+completion routing, and saving to JATOS and/or DataPipe. Real completion codes remain unset in
+`CONFIG`. The integrated JATOS-to-Drive run is recorded in INTEGRATION.md; failure paths and
+JATOS result-store consistency still need verification.
 and the multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit and a
 jsPsych preview build).

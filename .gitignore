@@ -4,3 +4,6 @@ vendor/
 # JATOS study archives written by `npm run jzip`.
 *.jzip
 node_modules/
+
+.build/
+dist/

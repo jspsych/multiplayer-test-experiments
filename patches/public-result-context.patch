@@ -1,0 +1,172 @@
+--- a/packages/utils/src/round-coordinator.ts
++++ b/packages/utils/src/round-coordinator.ts
+@@ -14,6 +14,8 @@
+   readonly value: T | null;
+   /** Authority-local monotonic time from activation; not physical stimulus onset. */
+   readonly rt: number;
++  /** Optional immutable authority observation captured at commitment. */
++  readonly context?: unknown;
+ }
+ export interface RoundFailure {
+   readonly reason: string;
+@@ -65,6 +67,9 @@
+   deadlines: RoundDeadlines;
+   /** Must accept only the JSON payloads this round permits, on both clients. */
+   validate: (value: unknown) => value is T;
++  /** Both callbacks must be supplied together on both clients. Only authority captures. */
++  getResultContext?: () => unknown;
++  validateResultContext?: (context: unknown) => boolean;
+   signal?: AbortSignal;
+   /** Opt-in bounded local timeline; adds no timers or shared transport writes. */
+   diagnostics?: boolean;
+@@ -136,6 +141,8 @@
+     !Number.isSafeInteger(options.roundIndex) ||
+     options.roundIndex < 0 ||
+     typeof options.validate !== "function" ||
++    ((options.getResultContext !== undefined || options.validateResultContext !== undefined) &&
++      (typeof options.getResultContext !== "function" || typeof options.validateResultContext !== "function")) ||
+     names.some((k) => !Number.isFinite(deadlines[k]) || deadlines[k] <= 0)
+   ) {
+     throw new TypeError(
+@@ -331,6 +338,13 @@
+       return false;
+     }
+   }
++  function validContext(value: unknown): boolean {
++    try {
++      return canonical(clone(value)) === canonical(value) && options.validateResultContext!(value);
++    } catch {
++      return false;
++    }
++  }
+   function validAuthority(a: any): a is Authority<T> {
+     if (!object(a) || a.roundId !== roundId || !Number.isSafeInteger(a.revision)) return false;
+     // Each authoritative transition increments once; snapshots may skip phases.
+@@ -342,6 +356,7 @@
+     return (
+       object(r) &&
+       r.id === resultId &&
++      (options.validateResultContext ? validContext(r.context) : !("context" in r)) &&
+       Number.isFinite(r.rt) &&
+       r.rt >= 0 &&
+       (r.kind === "timeout"
+@@ -464,8 +479,26 @@
+       fail("authority_stalled");
+       return false;
+     }
+-    const timeout = elapsed >= deadlines.response;
++    let timeout = elapsed >= deadlines.response;
+     if (!timeout && !valid(value)) return false;
++    let context: unknown;
++    if (options.getResultContext) {
++      try {
++        context = options.getResultContext();
++        if (!validContext(context)) throw new Error("Invalid context");
++        context = clone(context);
++      } catch {
++        fail("result_context_failed");
++        return false;
++      }
++      // Capture must not extend a deadline or mask cancellation/stalls.
++      if (!checkReference()) return false;
++      if (performance.now() - activeAt >= deadlines.response + deadlines.receipt) {
++        fail("authority_stalled");
++        return false;
++      }
++    }
++    timeout = performance.now() - activeAt >= deadlines.response;
+     transition(
+       "result",
+       freeze({
+@@ -473,6 +506,7 @@
+         kind: timeout ? "timeout" : "selection",
+         value: timeout ? null : clone(value),
+         rt: timeout ? deadlines.response : elapsed,
++        ...(options.getResultContext ? { context } : {}),
+       }),
+     );
+     return true;
+--- a/packages/utils/src/round-coordinator.spec.ts
++++ b/packages/utils/src/round-coordinator.spec.ts
+@@ -14,7 +14,7 @@
+   await Promise.all(clients.splice(0).map((c) => c.jsPsych.multiplayer.disconnect()));
+   jest.useRealTimers();
+ });
+-async function pair(diagnostics = false) {
++async function pair(diagnostics = false, contextOptions = {}) {
+   const hub = new MemoryHub();
+   const m = await hub.join("m"),
+     d = await hub.join("d");
+@@ -27,6 +27,7 @@
+     deadlines,
+     validate,
+     diagnostics,
++    ...contextOptions,
+   };
+   const interval = jest.spyOn(globalThis, "setInterval");
+   const a = createRoundCoordinator(m.jsPsych.multiplayer, config);
+@@ -490,3 +491,51 @@
+   await p.ready();
+   expect(p.a.state).not.toHaveProperty("diagnostics");
+ });
++
++
++test.each([false, true])("authority context is immutable and shared (timeout=%s)", async (timeout) => {
++  const observed = { directorDescribed: true };
++  const capture = jest.fn(() => observed);
++  const p = await pair(false, {
++    getResultContext: capture,
++    validateResultContext: (x: any) => typeof x?.directorDescribed === "boolean",
++  });
++  await p.ready();
++  if (timeout) await p.advance(1000); else p.a.submit({ choice: "A" });
++  await drain();
++  observed.directorDescribed = false;
++  expect(capture).toHaveBeenCalledTimes(1);
++  expect(p.a.state.result!.context).toEqual({ directorDescribed: true });
++  expect(p.b.state.result).toEqual(p.a.state.result);
++  expect(Object.isFrozen(p.a.state.result!.context)).toBe(true);
++});
++
++test.each(["throw", "undefined", "invalid", "nonJSON"])("bad context fails explicitly: %s", async (kind) => {
++  const p = await pair(false, {
++    getResultContext: () => {
++      if (kind === "throw") throw Error("capture");
++      return kind === "undefined" ? undefined : kind === "invalid" ? {} : { directorDescribed: true, extra: undefined };
++    },
++    validateResultContext: (x: any) => typeof x?.directorDescribed === "boolean",
++  });
++  await p.ready();
++  await p.advance(1000);
++  expect(p.a.state.failure!.reason).toBe("result_context_failed");
++  expect(p.a.state.result).toBeNull();
++});
++
++test("conflicting context cannot replace an accepted result", async () => {
++  const p = await pair(false, {
++    getResultContext: () => ({ directorDescribed: true }),
++    validateResultContext: (x: any) => typeof x?.directorDescribed === "boolean",
++  });
++  await p.ready();
++  p.a.submit({ choice: "A" });
++  await drain();
++  const record = p.m.jsPsych.multiplayer.get("m", { scope: "session" })![p.key()] as any;
++  await p.m.jsPsych.multiplayer.update({ [p.key()]: { ...record, authority: {
++    ...record.authority, result: { ...record.authority.result, context: { directorDescribed: false } },
++  } } }, { scope: "session" });
++  expect(p.b.state.failure!.reason).toBe("conflicting_result");
++  expect(p.b.state.result!.context).toEqual({ directorDescribed: true });
++});
+--- a/packages/utils/README.md
++++ b/packages/utils/README.md
+@@ -74,3 +74,10 @@
+ | `tabId(storageKey)` | An ID that survives reloads of this tab, kept in `sessionStorage`. |
+ | `generateId()` | A random UUID. |
+ | `validateId(adapterName, label, value)` | Throws unless `value` is an ID every adapter can store: non-empty, without `: / . # $ [ ]`. |
++
++Optional authority result context: supply both `getResultContext()` and
++`validateResultContext(context)` on both clients. Only authority capture runs,
++for selections and timeouts. It must return permitted JSON; capture/validation
++errors fail with `result_context_failed` without inventing a timeout. Received
++context is validated and immutable with the result. Use observations rather than
++claims about unseen actions. No context field is added when callbacks are absent.

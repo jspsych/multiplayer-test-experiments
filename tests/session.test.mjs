@@ -1,4 +1,4 @@
-// Schedule, idle detection, exit routing and the JATOS save target (hawkins.js).
+// Schedule, idle detection, round classification, exit routing and the JATOS save target (hawkins.js).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +8,7 @@ import "../hawkins.js";
 const {
   sequentialSchedule,
   idleRole,
-  createIdleTracker,
+  classifyRound,
   exitFor,
   EXIT_CODES,
   createJatosSink,
@@ -116,26 +116,63 @@ test("rounds that did not time out are nobody's fault", () => {
   }
 });
 
-test("the tracker fires once one role idles the limit in a row", () => {
-  const t = createIdleTracker(2);
-  assert.equal(t.record(timedOut(2, 0).director), null);
-  assert.equal(t.record(timedOut(1, 0).director), "matcher");
-});
+// ---- Round classification -----------------------------------------------------------------------
 
-test("a completed round, or the other role idling, restarts the count", () => {
-  const t = createIdleTracker(2);
-  t.record(timedOut(0, 0).matcher); // director idle
-  assert.equal(t.record({ role: "matcher", multiplayer_outcome: "completed" }), null);
-  assert.equal(t.record(timedOut(0, 0).matcher), null); // director idle, count 1 again
-  assert.equal(t.record(timedOut(3, 0).matcher), null); // matcher idle, count 1
-  assert.equal(t.record(timedOut(3, 0).matcher), "matcher");
-});
+// A selection_timeout round as the plugin records it: the empty choice is scored as wrong.
+const selectionTimeout = (side) => ({ ...side, assignment: null, correct: false, n_correct: 0, accuracy: 0, rt: 60003 });
 
-test("a slow but active pair never trips the tracker", () => {
-  const t = createIdleTracker(2);
-  for (let i = 0; i < 10; i++) {
-    assert.equal(t.record({ role: "director", multiplayer_outcome: i % 2 ? "timeout" : "completed", messages_sent: 4, message_count: 6 }), null);
+test("a timeout is never classified or scored as an incorrect selection", () => {
+  for (const [d, m, idle] of [[0, 0, "director"], [0, 2, "director"], [3, 0, "matcher"]]) {
+    for (const side of ["director", "matcher"]) {
+      const fields = classifyRound(selectionTimeout(timedOut(d, m)[side]));
+      assert.equal(fields.round_result, "timeout");
+      assert.equal(fields.timed_out, true);
+      assert.equal(fields.idle_role, idle, `${side}'s view of ${d}/${m}`);
+      assert.equal(fields.selection_made, false);
+      assert.equal(fields.correct, null);
+      assert.equal(fields.n_correct, null);
+      assert.equal(fields.accuracy, null);
+      assert.equal(fields.rt, null);
+    }
   }
+});
+
+test("both partners agree on who sent what in a round", () => {
+  const round = timedOut(2, 5);
+  for (const side of ["director", "matcher"]) {
+    const fields = classifyRound(round[side]);
+    assert.equal(fields.director_messages, 2);
+    assert.equal(fields.matcher_messages, 5);
+  }
+});
+
+test("a finished round is correct or incorrect, with nobody idle and scoring untouched", () => {
+  const right = classifyRound({ role: "matcher", multiplayer_outcome: "completed", correct: true, assignment: "A", messages_sent: 0, message_count: 1 });
+  assert.deepEqual([right.round_result, right.idle_role, right.timed_out, right.selection_made], ["correct", null, false, true]);
+  assert.equal("correct" in right, false);
+  const wrong = classifyRound({ role: "director", multiplayer_outcome: "completed", correct: false, assignment: "B", messages_sent: 1, message_count: 1 });
+  assert.deepEqual([wrong.round_result, wrong.idle_role, wrong.timed_out], ["incorrect", null, false]);
+  assert.equal("correct" in wrong, false);
+});
+
+test("a round cut short by a disconnection keeps the plugin's outcome", () => {
+  for (const multiplayer_outcome of ["participant_left", "connection_lost"]) {
+    const fields = classifyRound({ role: "director", multiplayer_outcome, assignment: null });
+    assert.equal(fields.round_result, multiplayer_outcome);
+    assert.equal(fields.idle_role, null);
+  }
+});
+
+test("gated matcher clicks are counted from the matcher's interaction history", () => {
+  const history = [{ action: "gated_click" }, { action: "gated_click" }, { action: "select" }];
+  assert.equal(classifyRound({ role: "matcher", multiplayer_outcome: "timeout", interaction_history: history }).matcher_gated_clicks, 2);
+  assert.equal(classifyRound({ role: "director", multiplayer_outcome: "timeout" }).matcher_gated_clicks, null);
+});
+
+test("the page never ends the game on a timeout", () => {
+  const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /IDLE_ROUNDS|idleTracker|interruption = "inactive_/);
+  assert.match(html, /selection_timeout: CONFIG\.MATCHER_COORDINATION \? null : CONFIG\.ROUND_TIMEOUT_MS/);
 });
 
 // ---- Exit routing -------------------------------------------------------------------------------
