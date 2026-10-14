@@ -15,6 +15,10 @@ test("countdown stops during feedback even when score text is disabled, and rese
   const feedback = { textContent: "" };
   const context = vm.createContext({
     CONFIG: { ROUND_TIMEOUT_MS: 60000 },
+    myRole: 'matcher', partnerId: 'director',
+    HawkinsUI: { chat() {}, timer() {}, result() {} },
+    jsPsych: { getDisplayElement: () => ({ querySelector: () => feedback }),
+      multiplayer: { participantId: 'matcher', getAll: () => ({}) } },
     Date: { now: () => now },
     document: {
       getElementById: () => remaining,

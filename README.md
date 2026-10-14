@@ -6,6 +6,10 @@ coordination and the existing integration test DataPipe destination together. Th
 allows two workers and two active members per group. Run `npm run jzip` to rebuild.
 See [INTEGRATION.md](INTEGRATION.md) for included PR commits and verification.
 
+It includes [clearer results, timer and chat controls](GAMEPLAY-CLARITY.md) and
+[the role-specific walkthrough plus two paired practice rounds](WALKTHROUGH-PRACTICE.md).
+Practice targets are excluded from the 18 main trials, with separately saved phase data.
+
 The following coordination documents describe the original isolated prototype. See
 [design](PUBLIC-COORDINATION-INTEGRATION.md) and [operator checks](PUBLIC-COORDINATION-OPERATOR.md).
 That prototype disabled DataPipe; this combined preview enables it. The frozen facade and MindProbe evidence remain

@@ -6,7 +6,7 @@ import vm from "node:vm";
 
 const page = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
 const source = page.slice(page.indexOf("    const roleTrial ="), page.indexOf("    const gameRound ="));
-const gameSource = page.slice(page.indexOf("    const gameLoop ="), page.indexOf("    // ---- Terminal screen"));
+const gameSource = page.slice(page.indexOf("    const gameLoop ="), page.indexOf("    const practiceLoop ="));
 
 function setup() {
   let role;
@@ -37,7 +37,7 @@ function setup() {
     clearInterval: () => { tick = undefined; },
   });
   vm.runInContext(
-    `let myRole = null, partnerId = null, noMatchReason = null;\n${source}\n` +
+    `let myRole = null, partnerId = null, noMatchReason = null, interruption = null;\n${source}\n` +
     `const gameRound = {}, SCHEDULE = [];\n${gameSource}`,
     context,
   );
