@@ -56,6 +56,11 @@ test("the archive's end record counts every entry", { skip: !hasVendor && "run s
 
   // Every file the page loads is in the archive.
   const html = entries.get(`${dir}/reference-game-hawkins.html`).toString("utf8");
+  assert.match(html, /MATCHER_COORDINATION: true/);
+  assert.match(html, /DATAPIPE_EXPERIMENT_ID: "wE2Zlitn0uhu"/);
+  const buildInfo = JSON.parse(entries.get(`${dir}/build-info.json`).toString());
+  assert.equal(buildInfo.profile, "integration-coordination-and-datapipe");
+  assert.match(buildInfo.sourceCommit, /^[a-f0-9]{40}$/);
   const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
   for (const ref of refs.filter((r) => r !== "jatos.js")) {
     assert.ok(entries.has(`${dir}/${ref}`), `the page loads ${ref}, which the archive lacks`);

@@ -2,7 +2,7 @@
  * One-command JATOS study packager for the Hawkins pilot prototype.
  *
  * Usage: node scripts/make-jzip.mjs
- * Output: reference-game-hawkins-jatos-prototype.jzip at the repo root.
+ * Output: test.jzip at the repo root.
  *
  * Why this exists (verified against JATOS 3.11.x source, not guessed):
  * JATOS "Import Study" does NOT accept a zip of bare study files. Its
@@ -35,14 +35,15 @@ import { deflateRawSync } from "node:zlib";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 // ---- Run configuration (edit for the paid batch; code reads nothing else)
 const COORDINATION_PROTOTYPE = process.env.COORDINATION_PROTOTYPE === "1";
-const STUDY_TITLE = COORDINATION_PROTOTYPE ? "Hawkins public coordination disposable prototype" : "Hawkins pilot prototype";
-const DIR_NAME = COORDINATION_PROTOTYPE ? "hawkins-public-coordination" : "hawkins-pilot-prototype"; // must avoid JATOS reserved names
+const STUDY_TITLE = COORDINATION_PROTOTYPE ? "Hawkins public coordination disposable prototype" : "Hawkins integration test";
+const DIR_NAME = COORDINATION_PROTOTYPE ? "hawkins-public-coordination" : "hawkins-integration-test"; // must avoid JATOS reserved names
 const ENTRY_HTML = "reference-game-hawkins.html";
 const BATCH = {
   title: "Single dyad test",
@@ -55,7 +56,7 @@ const BATCH = {
   maxTotalWorkers: 2, // single-dyad test cap; paid run raises this to sample size
   allowedWorkerTypes: ["GeneralSingle", "GeneralMultiple"],
 };
-const OUT_NAME = process.env.JZIP_OUT ?? "reference-game-hawkins-jatos-prototype.jzip";
+const OUT_NAME = process.env.JZIP_OUT ?? "test.jzip";
 
 // Study files that ship as JATOS assets (jatos.js is server-injected). The vendor/ files are
 // whatever scripts/vendor.mjs recorded in vendor/manifest.json.
@@ -225,14 +226,22 @@ for (const p of ASSET_PATHS) {
 }
 
 const entries = [];
+const buildInfo = {
+  sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO, encoding: "utf8" }).trim(),
+  builtAt: new Date().toISOString(),
+  profile: COORDINATION_PROTOTYPE ? "disposable-no-datapipe" : "integration-coordination-and-datapipe",
+  sourceHashes: Object.fromEntries([...ASSET_PATHS, "scripts/make-jzip.mjs"].map(p =>
+    [p, crypto.createHash("sha256").update(fs.readFileSync(path.join(REPO, p))).digest("hex")])),
+};
 const jasName = `${DIR_NAME}.jas`;
 entries.push({ name: jasName, data: Buffer.from(buildJas(), "utf8") });
 entries.push({ name: `${DIR_NAME}/`, data: null });
+entries.push({ name: `${DIR_NAME}/build-info.json`, data: Buffer.from(JSON.stringify(buildInfo, null, 2)) });
 for (const p of ASSET_PATHS) {
   let data = fs.readFileSync(path.join(REPO, p));
   if (COORDINATION_PROTOTYPE && p === ENTRY_HTML) {
     const source = data.toString("utf8");
-    const mode = /MATCHER_COORDINATION: new URLSearchParams\(location.search\).get\("coordination"\) === "matcher"/;
+    const mode = /MATCHER_COORDINATION: true/;
     const pipe = /DATAPIPE_EXPERIMENT_ID: "[^"]*"/;
     if (!mode.test(source) || !pipe.test(source)) throw new Error("Prototype configuration no longer matches the packager");
     data = Buffer.from(source.replace(mode, "MATCHER_COORDINATION: true").replace(pipe, 'DATAPIPE_EXPERIMENT_ID: ""'));

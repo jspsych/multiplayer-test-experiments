@@ -199,9 +199,9 @@
     const MIN_PLAYERS = 2;
 
     const CONFIG = {
-      // Opt-in review prototype. Its synthetic tests never write to configured DataPipe storage.
+      // Combined integration preview: coordination is enabled for JATOS and local testing.
       COORDINATION_DIAGNOSTICS: true,
-      MATCHER_COORDINATION: new URLSearchParams(location.search).get("coordination") === "matcher",
+      MATCHER_COORDINATION: true,
       COORDINATION_READY_MS: 30000,
       COORDINATION_RECEIPT_MS: 15000,
       COORDINATION_FEEDBACK_MS: 30000,
@@ -244,9 +244,8 @@
       // and the round ends with "connection_lost". The core's default is to retry forever, which
       // leaves a JATOS participant whose channel the server closed stuck on "reconnecting".
       RECONNECT_GIVE_UP_MS: 60000,
-      // Validation packet: DataPipe disabled; JATOS saves independently.
-      // A paid-run ID remains a later review choice.
-      DATAPIPE_EXPERIMENT_ID: "",
+      // Existing integration test storage; replace for a paid run after review.
+      DATAPIPE_EXPERIMENT_ID: "wE2Zlitn0uhu",
       JATOS_SAVE_PER_ROUND: true,
     };
 
@@ -256,7 +255,6 @@
     // staging metadata. Those identifiers remain in the saved trial rows.
     const datapipeFilename = `${crypto.randomUUID()}.json`;
     let pipeSaveResult = { skipped: true };
-    if (CONFIG.MATCHER_COORDINATION) CONFIG.DATAPIPE_EXPERIMENT_ID = "";
     const jsPsych = initJsPsych({
       extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,

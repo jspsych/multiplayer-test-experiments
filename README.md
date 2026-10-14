@@ -1,8 +1,14 @@
 # multiplayer-test-experiments
 
-This branch is the public Hawkins coordination integration packet. See
+This branch is the combined Hawkins testing preview. Download **[test.jzip](test.jzip)**
+from the repository root and import it with JATOS **Import Study**. It enables matcher
+coordination and the existing integration test DataPipe destination together. The batch
+allows two workers and two active members per group. Run `npm run jzip` to rebuild.
+See [INTEGRATION.md](INTEGRATION.md) for included PR commits and verification.
+
+The following coordination documents describe the original isolated prototype. See
 [design](PUBLIC-COORDINATION-INTEGRATION.md) and [operator checks](PUBLIC-COORDINATION-OPERATOR.md).
-Validation DataPipe is disabled. The frozen facade and MindProbe evidence remain
+That prototype disabled DataPipe; this combined preview enables it. The frozen facade and MindProbe evidence remain
 in `.worktrees/hawkins-coordination`; they do not validate this replacement.
 
 Matcher-owned coordination is an opt-in review prototype on this branch. See
@@ -10,8 +16,8 @@ Matcher-owned coordination is an opt-in review prototype on this branch. See
 [evidence, limitations and operator checks](COORDINATION-EVIDENCE.md).
 The [authorized MindProbe validation](COORDINATION-MINDPROBE-VALIDATION.md) records
 the tested JATOS full run and frozen-matcher failure.
-The documented `?coordination=matcher&mp_session=...` URL disables DataPipe for
-synthetic local testing; the default pilot page retains its existing configuration.
+This combined preview enables coordination and test DataPipe by default.
+The historical prototype URLs and evidence below describe earlier configurations.
 
 Standalone, faithful replication builds of published reference-game studies, built on
 [jspsych-multiplayer](https://github.com/jspsych/jspsych-multiplayer) plugins. Ported out of that
@@ -100,10 +106,10 @@ from a single study link and the adapter seals each pair.
 
 ### DataPipe setup for the Hawkins pilot
 
-`CONFIG.DATAPIPE_EXPERIMENT_ID` is empty in this validation packet. Coordinated
-mode also disables Pipe before extension setup. Keep it disabled for all replacement
-checks; JATOS saving remains enabled. A later paid-run packet may configure a
-[DataPipe experiment](https://pipe.jspsych.org/getting-started), pending review, and verify a completed test run in
+`CONFIG.DATAPIPE_EXPERIMENT_ID` uses the existing integration test experiment
+`wE2Zlitn0uhu`, including in coordinated mode. JATOS saving remains enabled.
+Use this test destination for the combined validation; a paid-run destination remains
+pending review. Verify a completed test run in
 the linked Drive folder before a paid run. The extension stages each completed trial and submits one
 JSON file when the jsPsych timeline ends; an abandoned run can yield a `.partial.json` file. The
 filename is random and carries no participant identifier. Prolific, participant, and dyad IDs remain

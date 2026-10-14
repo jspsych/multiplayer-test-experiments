@@ -30,10 +30,12 @@ for (const outcome of ["completed", "timeout", "connection_lost"]) {
     assert.equal(classify(data).round_result, outcome === "completed" ? "correct" : outcome);
   });
 }
-test("page routes failure even after accepted behavior and keeps DataPipe disabled", () => {
+test("page routes failure even after accepted behavior and allows integration DataPipe", () => {
   const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
   assert.match(html, /if \(data.coordination_failure\) \{[\s\S]*?interruption = "connection_lost"/);
-  assert.match(html, /if \(CONFIG.MATCHER_COORDINATION\) CONFIG.DATAPIPE_EXPERIMENT_ID = ""/);
+  assert.match(html, /MATCHER_COORDINATION: true/);
+  assert.match(html, /DATAPIPE_EXPERIMENT_ID: "wE2Zlitn0uhu"/);
+  assert.doesNotMatch(html, /if \(CONFIG.MATCHER_COORDINATION\) CONFIG.DATAPIPE_EXPERIMENT_ID = ""/);
   assert.doesNotMatch(html, /createCoordinatedReferenceGame|round-coordinator.js/);
 });
 
