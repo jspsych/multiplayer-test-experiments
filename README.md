@@ -88,6 +88,7 @@ should be ported to Hawkins rather than treating C&WG as the first launch target
    exports/builds the pinned public source with `patches/public-result-context.patch`.
    Supply the sibling checkout path explicitly from this nested worktree. It reads the
    core from that pin and reuses SHA-verified third-party assets from the frozen vendor.
+   Cached build sources are verified against a fresh pinned export plus patch before reuse.
    See the operator record for exact commands.
 2. Serve the repo over http (e.g. `npx http-server .`) and open the page. It adds `?mp_session=…` to
    the URL.

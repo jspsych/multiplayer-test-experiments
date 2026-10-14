@@ -31,7 +31,8 @@ execFileSync(process.execPath, ["scripts/make-jzip.mjs"], { cwd: root, stdio: "i
 const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 const files = ["reference-game-hawkins.html", "hawkins-coordination.js", "patches/public-result-context.patch",
   "hawkins.js", "presence-check.js", "tangrams.js", "scripts/make-jzip.mjs",
-  "scripts/prepare-coordination.mjs", "scripts/vendor.mjs", "scripts/stage-public-source.mjs", "scripts/test-coordination-plugin.mjs", "vendor/manifest.json"];
+  "scripts/prepare-coordination.mjs", "scripts/vendor.mjs", "scripts/stage-public-source.mjs",
+  "scripts/verify-public-source.mjs", "scripts/test-coordination-plugin.mjs", "vendor/manifest.json"];
 const evidence = {
   frozenComparisonHead: "bf82c22",
   combinedBaseline: "21a73451579782acc44d8946a466a0829bb0f261",

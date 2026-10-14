@@ -32,7 +32,12 @@ packages, and uses that pin's vendored core preview
 third-party assets (html-keyboard-response 2.2.0, preload/call-function 2.1.0,
 Pipe 0.2.0). Source exports/builds remain ignored in `.build/`; no sibling source,
 branch or tested archive is changed. This patch is not yet part of PR #117.
-Existing `.build/public` is checked for the patch before rebuilding.
+Before rebuilding, existing `.build/public` is automatically compared with a fresh
+pinned export plus patch. Verification covers the complete source tree, including
+build configuration, lockfiles and vendored core bundles; installed `node_modules`,
+generated package `dist` folders and coverage outputs are excluded. Modified,
+missing or extra source files stop the build, and temporary verification exports
+are removed after the check.
 
 Serve from the worktree:
 

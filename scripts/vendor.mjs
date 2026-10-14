@@ -51,6 +51,9 @@ function buildMultiplayer() {
   const worktree = path.join(REPO, ".build/public");
   if (!fs.existsSync(worktree)) {
     run(process.execPath, ["scripts/stage-public-source.mjs", checkout], REPO);
+  } else {
+    // Verify every source/config/lockfile against a fresh export before executing cached code.
+    run(process.execPath, ["scripts/stage-public-source.mjs", checkout, "--verify"], REPO);
   }
   run("git", ["apply", "--check", "--reverse", "--no-index", path.join(REPO, "patches/public-result-context.patch")], worktree);
   if (!fs.existsSync(path.join(worktree, "node_modules")))
