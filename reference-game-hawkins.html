@@ -24,8 +24,26 @@
     <script src="presence-check.js"></script>
     <script src="vendor/utils.js"></script>
     <script src="hawkins-coordination.js"></script>
+    <script src="hawkins-ui.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
+      .hk-status { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; text-align: left; }
+      .hk-stat { flex: 1; min-width: 140px; padding: 10px 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
+      .hk-stat span, .hk-stat small { display: block; font-size: 15px; }
+      .hk-stat strong { display: block; font-size: 26px; line-height: 1.35; }
+      .hk-timer { background: #eaf2ff; border: 2px solid #315c9e; }
+      .hk-timer.is-urgent { background: #fff3df; border-color: #9c5400; }
+      #hk-time-hint { min-height: 1.3em; font-weight: bold; }
+      .hk-chat-label { display: block; text-align: left; font-size: 20px; font-weight: bold; margin-top: 16px; }
+      .hk-chat-help { text-align: left; margin: 4px 0 8px; font-size: 16px; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-input { border: 2px solid #315c9e; border-radius: 6px; padding: 12px; font-size: 18px; background: #fff; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-input:focus { outline: 3px solid #90b5ec; outline-offset: 2px; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-send { padding: 12px 20px; font-weight: bold; background: #234f90; color: white; border-radius: 6px; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-feedback { font-size: 26px; padding: 10px; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-feedback.is-timeout { color: #805000; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-feedback:empty { display: none; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-role { display: none; }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-log { min-height: 60px; }
       /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
          version), OSF osf.io/vzvmf.
          The original lays out a 6×2 grid of square 300×300px cells (game.core.js), and
@@ -231,6 +249,7 @@
       READY_TIMEOUT_MS: 2 * 60000,
       // Round limit, as the matcher's `selection_timeout`: on expiry both players see feedback.
       ROUND_TIMEOUT_MS: 60000,
+      TIMER_WARNING_SECONDS: 10,
       // Backstop `round_timeout` after the limit, for when the matcher's submission never arrives
       // (e.g. a frozen tab). That round ends without feedback, still as a timeout.
       ROUND_TIMEOUT_GRACE_MS: 5000,
@@ -688,8 +707,8 @@
               <p>Use the <strong>chat box below the shapes</strong>. You <strong>must send at least one
                  message every round</strong> — your partner can't click until you do.</p>
               <p>After each choice you'll see your partner's pick outlined in green. Green on your
-                 screen marks their pick, not necessarily the right answer, so check the score at
-                 the top.</p>
+                 screen marks their pick, not necessarily the right answer. The result message
+                 says <strong>Correct</strong> or <strong>Incorrect</strong>.</p>
               <p>You will stay the <strong>Director for the whole game</strong>.
                  Roles do not switch.</p>`;
             const matcherCopy = `
@@ -847,9 +866,7 @@
         const score = finished.filter({ correct: true }).count();
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
-        const header = `<p>Trial ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}
-          &nbsp;|&nbsp; Time remaining: <span id="round-remaining">${roundSeconds}s</span></p>
-          <p id="round-note" class="hk-round-note" aria-live="polite"></p>`;
+        const header = HawkinsUI.header({ round: roundNum, total: SCHEDULE.length, score, seconds: roundSeconds });
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -861,6 +878,7 @@
           : `${header}<p><strong>You are the Matcher.</strong> ${matcher}</p>`;
       },
       on_load: () => {
+        HawkinsUI.chat(jsPsych.getDisplayElement(), myRole);
         // Coordinated mode owns the approximate countdown from observed activation.
         if (CONFIG.MATCHER_COORDINATION) return;
         // The plugin starts its wall-clock timers during synchronous trial setup, just before
@@ -898,7 +916,17 @@
             remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
           }
         };
-        const countdownInterval = window.setInterval(update, 200);
+        const countdownInterval = window.setInterval(() => {
+          update();
+          const display = jsPsych.getDisplayElement();
+          const active = !chatInput?.disabled;
+          HawkinsUI.timer(display, Math.max(0, Math.ceil((deadline - Date.now()) / 1000)), CONFIG.TIMER_WARNING_SECONDS, active);
+          if (!active) {
+            const matcherId = myRole === 'matcher' ? jsPsych.multiplayer.participantId : partnerId;
+            const submission = jsPsych.multiplayer.getAll()[matcherId]?.submission;
+            if (submission) HawkinsUI.result(display, { kind: submission.timed_out ? 'timeout' : 'selection', value: submission });
+          }
+        }, 200);
         update();
         roundCountdownInterval = countdownInterval;
       },

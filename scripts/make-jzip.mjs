@@ -70,6 +70,7 @@ const ASSET_PATHS = [
   "tangrams.js",
   "hawkins.js",
   "hawkins-coordination.js",
+  "hawkins-ui.js",
   "presence-check.js",
   "assets/tangrams/tangram_A.png",
   "assets/tangrams/tangram_B.png",

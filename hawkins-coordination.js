@@ -5,6 +5,10 @@
     function render() {
       const display = getDisplay();
       if (!display || !latest) return;
+      const seconds = activation === null ? config.ROUND_TIMEOUT_MS / 1000
+        : Math.max(0, Math.ceil((config.ROUND_TIMEOUT_MS - (performance.now() - activation)) / 1000));
+      global.HawkinsUI?.timer(display, seconds, config.TIMER_WARNING_SECONDS, latest.phase === 'active');
+      global.HawkinsUI?.result(display, latest.result);
       const remaining = display.querySelector('#round-remaining');
       if (remaining) remaining.textContent = latest.phase === 'preparing'
         ? 'Waiting for both players'
