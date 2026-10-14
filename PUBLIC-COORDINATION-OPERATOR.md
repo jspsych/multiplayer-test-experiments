@@ -1,7 +1,9 @@
 # Public Hawkins coordination: operator handoff
 
-Replacement browser and MindProbe checks are **pending**. The frozen facade's
-successful MindProbe run does not validate these assets. No browser automation,
+Manual replacement browser checks were completed on 2026-10-13; see
+[the browser evidence record](PUBLIC-COORDINATION-BROWSER-EVIDENCE.md) for
+coverage and remaining checks. Replacement MindProbe checks remain pending.
+The frozen facade's successful MindProbe run does not validate these assets. No browser automation,
 import/deploy, worker run, administrative operation or DataPipe upload was done
 for this packet. The old JATOS runner is disabled here; the frozen runner remains
 in its comparison worktree. New automation requires explicit session authorization.

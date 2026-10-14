@@ -79,3 +79,12 @@ was made. Main checkout's existing HTML/countdown edits and local data, pr31 edi
 pr31-drive temporary body, sibling local datasets, all other worktrees and original
 archives remain in place. Frozen prototype source remains at bf82c22; public
 prototype remains at 044ae08; shared-clock branches remain at 614c84c and 3fb051af.
+
+## Subsequent manual browser evidence
+
+On 2026-10-13 the operator tested the public replacement locally.
+[Browser evidence](PUBLIC-COORDINATION-BROWSER-EVIDENCE.md) records completed
+full progression, delayed entry, frozen matcher and delayed feedback checks,
+including accepted selection/timeout preservation. The pending browser statements
+above describe the original implementation handoff. Remaining manual coverage and
+replacement JATOS validation are listed in the subsequent record.
