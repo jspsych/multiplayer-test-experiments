@@ -25,8 +25,17 @@
     <script src="vendor/utils.js"></script>
     <script src="hawkins-coordination.js"></script>
     <script src="hawkins-ui.js"></script>
+    <script src="hawkins-onboarding.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
+      .hk-walk-copy { max-width: 44em; margin: 0 auto 20px; }
+      .hk-walk-copy button { padding: 10px 20px; font: inherit; }
+      .hk-preview-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 130px)); gap: 8px; justify-content: center; }
+      .hk-preview-grid .jspsych-multiplayer-reference-game-cell { border: 2px solid #ccc; border-radius: 6px; }
+      .hk-preview-grid .jspsych-multiplayer-reference-game-cell.is-target { border-color: #e5a000; box-shadow: 0 0 0 2px #e5a000; }
+      .hk-preview-chat form { display: flex; gap: 10px; }
+      .hk-preview-chat input { flex: 1; min-width: 0; }
+      .hk-walkthrough [hidden] { display: none !important; }
       .hk-status { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; text-align: left; }
       .hk-stat { flex: 1; min-width: 140px; padding: 10px 16px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; }
       .hk-stat span, .hk-stat small { display: block; font-size: 15px; }
@@ -227,6 +236,8 @@
       PILOT_LABEL: "hawkins-18-trial-paid-pilot",
       BLOCKS: 3,
       COMPREHENSION_CHECK: true,
+      INTERFACE_WALKTHROUGH: true,
+      PRACTICE_ROUNDS: 2,
       TARGETS_PER_BLOCK: 6, // random subset per dyad; all 12 shapes remain visible
       // Replace these placeholders with real Prolific codes before the paid run. The placeholder
       // allows testing the redirect, but is not a valid Prolific completion code.
@@ -295,6 +306,7 @@
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
     // Built after connecting, from the session's shared randomness (see start()).
     let SCHEDULE = [];
+    let PRACTICE_SCHEDULE = [];
 
     // Identity, captured once connected. Every jsPsych row recorded while connected gets these
     // as multiplayer_participant_id and multiplayer_session_id.
@@ -345,15 +357,16 @@
     let interruption = null; // "partner_left" | "connection_lost"
     let coordinationFailure = null;
     let interruptedAtRound = null;
+    let interruptedPhase = null;
     let outcome = null;
 
     const completedRounds = () =>
-      jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", multiplayer_outcome: "completed" });
+      jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", phase: "main", multiplayer_outcome: "completed" });
     // Rounds that ran to their end, with a choice or a timeout; the game goes on after either.
     const playedRounds = () =>
       jsPsych.data
         .get()
-        .filterCustom((t) => t.trial_type === "multiplayer-reference-game" &&
+        .filterCustom((t) => t.trial_type === "multiplayer-reference-game" && t.phase === "main" &&
           (t.multiplayer_outcome === "completed" || t.multiplayer_outcome === "timeout"));
 
     function recordOutcome(exit) {
@@ -364,6 +377,8 @@
         ended_reason: exit,
         no_match_reason: noMatchReason,
         interrupted_at_round: interruptedAtRound,
+        interrupted_phase: interruptedPhase,
+        n_practice_played: jsPsych.data.get().filterCustom(t => t.trial_type === "multiplayer-reference-game" && t.phase === "practice" && (t.multiplayer_outcome === "completed" || t.multiplayer_outcome === "timeout")).count(),
         n_trials_completed: completed,
         n_trials_timed_out: played - completed,
         n_trials_played: played,
@@ -465,7 +480,7 @@
          <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
              Matcher picked a different one, their pick is outlined in blue.</li>
        </ul>
-       <p>There are ${totalRounds} trials, with no breaks.</p>
+       <p>${CONFIG.PRACTICE_ROUNDS ? `First you will play ${CONFIG.PRACTICE_ROUNDS} practice rounds together, then ` : 'There are '}${totalRounds} main-game trials, with no breaks during the main game. Practice does not count toward the main-game score.</p>
        <p>${CONFIG.COMPREHENSION_CHECK ? "Next, answer three quick questions about the task. Then you" : "Next you"}
           will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
@@ -813,6 +828,18 @@
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
+    const interfaceWalkthrough = {
+      timeline: [{ type: jsPsychCallFunction, async: true,
+        func: done => HawkinsOnboarding.walkthrough(jsPsych.getDisplayElement(), {
+          role: myRole, shapes: SHAPES, target: PRACTICE_SCHEDULE[0]?.targets[0] ??
+            SHAPES.find(s => !SCHEDULE.some(t => t.targets[0] === s.id))?.id ?? SHAPES[0].id,
+          seconds: CONFIG.ROUND_TIMEOUT_MS / 1000, practiceRounds: CONFIG.PRACTICE_ROUNDS, mainRounds: SCHEDULE.length,
+        }, done),
+        on_finish: () => saveProgress(),
+      }],
+      conditional_function: () => CONFIG.INTERFACE_WALKTHROUGH && !noMatchReason,
+    };
+
     let roundCountdownInterval = null;
     let roundFeedbackShown = false;
     const gameRound = {
@@ -825,6 +852,7 @@
       partner_id: () => partnerId,
       round: jsPsych.timelineVariable("round"),
       targets: jsPsych.timelineVariable("targets"), // one target, one click
+      data: { phase: jsPsych.timelineVariable("phase"), phase_round: jsPsych.timelineVariable("phase_round") },
       scramble_mode: "disjoint",
       reveal_target_to: "director",
       // Unrestricted chat both ways. These are the defaults, stated because the effect depends on them.
@@ -862,11 +890,12 @@
       // the original tells both roles they may "talk to the director", a copy-paste slip, so the
       // director's copy names the matcher.
       prompt: (role) => {
-        const finished = jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game" });
+        const phase = jsPsych.evaluateTimelineVariable("phase");
+        const finished = jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", phase });
         const score = finished.filter({ correct: true }).count();
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
-        const header = HawkinsUI.header({ round: roundNum, total: SCHEDULE.length, score, seconds: roundSeconds });
+        const header = HawkinsUI.header({ round: roundNum, total: phase === 'practice' ? PRACTICE_SCHEDULE.length : SCHEDULE.length, score, seconds: roundSeconds, phase });
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -934,6 +963,7 @@
         clearInterval(roundCountdownInterval);
         roundCountdownInterval = null;
         Object.assign(data, Hawkins.classifyRound(data), {
+          main_round: data.phase === 'main' ? data.phase_round : null,
           feedback_shown: CONFIG.MATCHER_COORDINATION ? Boolean(data.coordination_result) : roundFeedbackShown,
           timeout_source:
             data.multiplayer_outcome !== "timeout"
@@ -956,6 +986,7 @@
         else if (data.multiplayer_outcome === "connection_lost") interruption = "connection_lost";
         if (interruption) {
           interruptedAtRound = data.round;
+          interruptedPhase = data.phase;
           jsPsych.abortCurrentTimeline();
         }
       },
@@ -964,7 +995,29 @@
     const gameLoop = {
       timeline: [gameRound],
       timeline_variables: SCHEDULE, // replaced in start(), once the schedule exists
-      conditional_function: () => !noMatchReason,
+      conditional_function: () => !noMatchReason && !interruption,
+    };
+
+    const practiceLoop = {
+      timeline: [gameRound], timeline_variables: PRACTICE_SCHEDULE,
+      conditional_function: () => CONFIG.PRACTICE_ROUNDS > 0 && !noMatchReason && !interruption,
+    };
+    const mainTransition = {
+      timeline: [continueScreen(`<h2>The main game is next</h2>
+        <p>You have finished practice. Your main-game score starts at zero.</p>
+        <p>You will play ${totalRounds} trials together in the same roles. Both partners must continue before the first round starts.</p>`,
+        { instruction_screen: 'main_transition' })],
+      conditional_function: () => CONFIG.PRACTICE_ROUNDS > 0 && !noMatchReason && !interruption,
+    };
+    const mainReadyBarrier = {
+      timeline: [{ type: jsPsychCallFunction, async: true, func: done => {
+        jsPsych.getDisplayElement().innerHTML = '<p>Waiting for both partners to start the main game…</p>';
+        HawkinsOnboarding.waitForBoth(jsPsych.multiplayer, 'ready_for_main', CONFIG.READY_TIMEOUT_MS, data => {
+          if (data.main_readiness !== 'matched') { interruption = 'connection_lost'; interruptedPhase = 'transition'; }
+          done(data);
+        });
+      }, on_finish: () => saveProgress() }],
+      conditional_function: () => CONFIG.PRACTICE_ROUNDS > 0 && !noMatchReason && !interruption,
     };
 
     // ---- Terminal screen ------------------------------------------------------------------------
@@ -1115,9 +1168,16 @@
         (key, array) => jsPsych.multiplayer.shuffle(key, array),
         CONFIG.TARGETS_PER_BLOCK,
       );
+      const phases = HawkinsOnboarding.schedules(SCHEDULE, SHAPES.map(s => s.id), CONFIG.PRACTICE_ROUNDS,
+        (key, ids) => jsPsych.multiplayer.shuffle(key, ids));
+      SCHEDULE = phases.main;
+      PRACTICE_SCHEDULE = phases.practice;
       gameLoop.timeline_variables = SCHEDULE;
+      practiceLoop.timeline_variables = PRACTICE_SCHEDULE;
       jsPsych.data.addProperties({
         config_trials: SCHEDULE.length,
+        config_practice_rounds: CONFIG.PRACTICE_ROUNDS,
+        practice_target_ids: PRACTICE_SCHEDULE.map(t => t.targets[0]),
         assigned_target_ids: SCHEDULE.slice(0, CONFIG.TARGETS_PER_BLOCK).map((trial) => trial.targets[0]).sort(),
       });
 
@@ -1129,7 +1189,11 @@
         preparationBarrier,
         pairingPhase,
         roleRecap,
+        interfaceWalkthrough,
         readyBarrier,
+        practiceLoop,
+        mainTransition,
+        mainReadyBarrier,
         gameLoop,
         terminalScreen,
       ]);

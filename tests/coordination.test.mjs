@@ -46,7 +46,7 @@ for (const kind of ["selection", "timeout"]) {
     let saves = 0, aborts = 0;
     const context = vm.createContext({ CONFIG: { MATCHER_COORDINATION: true, JATOS_SAVE_PER_ROUND: true },
       Hawkins: globalThis.Hawkins, roundCountdownInterval: null, roundFeedbackShown: false,
-      coordinationFailure: null, interruption: null, interruptedAtRound: null,
+      coordinationFailure: null, interruption: null, interruptedAtRound: null, interruptedPhase: null,
       clearInterval() {}, saveProgress() { saves++; }, jsPsych: { abortCurrentTimeline() { aborts++; } } });
     const finish = vm.runInContext(`(${handler})`, context);
     const data = { round: 3, multiplayer_outcome: kind === "selection" ? "completed" : "timeout",

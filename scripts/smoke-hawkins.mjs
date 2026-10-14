@@ -54,7 +54,8 @@ try {
   for (let n = 0; n < 100; n++) { try { version = await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json(); break; } catch { await pause(100); } }
   if (!version) throw Error('Chrome did not start');
   browser = new CDP(version.webSocketDebuggerUrl);
-  const url = `http://127.0.0.1:${port}/reference-game-hawkins.html?coordination=matcher&mp_session=smoke-${Date.now()}`;
+  const coordinated = process.env.SMOKE_COORDINATION !== 'off';
+  const url = `http://127.0.0.1:${port}/reference-game-hawkins.html?${coordinated ? 'coordination=matcher&' : ''}mp_session=smoke-${Date.now()}`;
   for (let i = 0; i < 2; i++) {
     const { targetId } = await browser.call('Target.createTarget', { url: 'about:blank' });
     const list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
@@ -64,6 +65,8 @@ try {
     await page.call('Page.navigate', { url });
   }
   const results = []; let savedScreens = false;
+  const exerciseTimeout = process.env.SMOKE_TIMEOUT === '1';
+  let warningChecked = false, feedbackChecked = false;
   const began = Date.now(); let lastRound = null;
   while (Date.now() - began < 180000) {
     for (const page of pages) await page.eval(`(() => {
@@ -72,21 +75,54 @@ try {
         const radio = [...document.querySelectorAll('input[type=radio]')].find(e => e.name === name && e.value === answers[i]); if (radio) radio.checked = true;
       }
       document.querySelector('#comprehension-form')?.requestSubmit();
+      document.querySelector('.presence-check-button')?.click();
       for (const id of ['continue-instructions', 'continue-feedback', 'continue-walkthrough', 'continue-main']) document.getElementById(id)?.click();
     })()`);
-    const snapshots = await Promise.all(pages.map(page => page.eval(`({ role: document.body?.dataset.role, phase: document.querySelector('[data-coordination-phase]')?.dataset.coordinationPhase, state: window.hawkinsCoordinationSnapshot, text: document.body?.innerText ?? "", input: !!document.querySelector('.hk-chat-label'), feedback: document.querySelector('.jspsych-multiplayer-reference-game-feedback')?.textContent })`)));
+    const snapshots = await Promise.all(pages.map(page => page.eval(`(() => {
+      const isGame = !!document.querySelector('.jspsych-multiplayer-reference-game:not(.hk-walkthrough)');
+      const input = document.querySelector('.jspsych-multiplayer-reference-game-chat-input');
+      return { role: document.body?.dataset.role,
+        phase: document.querySelector('[data-coordination-phase]')?.dataset.coordinationPhase ?? (isGame ? (input?.disabled ? 'result' : 'active') : null),
+        state: isGame ? (window.hawkinsCoordinationSnapshot ?? { roundId: jsPsych.evaluateTimelineVariable('round') }) : null,
+        text: document.body?.innerText ?? '', input: !!document.querySelector('.hk-chat-label'),
+        urgent: document.querySelector('.hk-timer')?.classList.contains('is-urgent'),
+        feedback: document.querySelector('.jspsych-multiplayer-reference-game-feedback')?.textContent };
+    })()`)));
+    if (exerciseTimeout && snapshots.every(s => s.phase === 'active' && s.urgent)) warningChecked = true;
+    if (snapshots.every(s => s.phase === 'result' && s.feedback)) {
+      const expected = results.at(-1)?.mode === 'timeout' ? 'Time’s up — no choice was made.' : results.at(-1)?.mode === 'incorrect' ? 'Incorrect.' : 'Correct!';
+      assert(snapshots.every(s => s.feedback === expected), JSON.stringify(snapshots.map(s => s.feedback)));
+      if (results.at(-1)?.mode === 'timeout') feedbackChecked = true;
+    }
     if (snapshots.every(s => s.text.includes('Download data (JSON)'))) break;
     const director = snapshots.findIndex(s => s.role === 'director'), matcher = snapshots.findIndex(s => s.role === 'matcher');
     if (director >= 0 && matcher >= 0 && snapshots.every(s => s.phase === 'active')) {
       const identity = snapshots[matcher].state?.roundId;
       if (identity !== lastRound || !savedScreens) {
         assert(snapshots.every(s => s.input), 'Chat labels missing');
+        for(const page of pages) {
+          const progress = await page.eval(`(() => {
+            const phase = jsPsych.evaluateTimelineVariable('phase');
+            const index = jsPsych.evaluateTimelineVariable('phase_round');
+            const earlier = jsPsych.data.get().values().filter(r => r.trial_type === 'multiplayer-reference-game' && r.phase === phase);
+            return { phase, index, progress: document.querySelector('.hk-stat:first-child')?.innerText,
+              score: document.querySelector('#hk-score')?.textContent, expectedScore: earlier.filter(r => r.correct).length };
+          })()`);
+          if(progress.phase) {
+            assert(progress.progress.includes(`${progress.index + 1} of`), JSON.stringify(progress));
+            assert.equal(Number(progress.score), progress.expectedScore);
+            assert.equal(progress.progress.includes('Practice round'), progress.phase === 'practice');
+          }
+        }
         if (!savedScreens) { for(let i=0;i<2;i++) { const shot = await pages[i].call('Page.captureScreenshot'); await writeFile(resolve(out, `role-${snapshots[i].role}.png`), Buffer.from(shot.data, 'base64')); } savedScreens = true; }
         const target = await pages[director].eval(`document.querySelector('.jspsych-multiplayer-reference-game-cell.is-target')?.dataset.objectId`);
+        const mode = exerciseTimeout && results.length === 0 ? 'incorrect' : exerciseTimeout && results.length === 1 ? 'timeout' : 'correct';
         await pages[director].eval(`(() => { const input = document.querySelector('.jspsych-multiplayer-reference-game-chat-input'); input.value = 'Test description'; input.form.requestSubmit(); })()`);
         await pause(200);
-        await pages[matcher].eval(`document.querySelector('[data-object-id="${target}"]')?.click()`);
-        lastRound = identity; results.push({ target });
+        if (mode !== 'timeout') await pages[matcher].eval(mode === 'incorrect'
+          ? `[...document.querySelectorAll('[data-object-id]')].find(e => e.dataset.objectId !== '${target}')?.click()`
+          : `document.querySelector('[data-object-id="${target}"]')?.click()`);
+        lastRound = identity; results.push({ target, mode });
       }
     }
     await pause(150);
@@ -94,6 +130,30 @@ try {
   for (const page of pages) assert.equal(page.errors.length, 0, JSON.stringify(page.errors));
   const data = await Promise.all(pages.map(page => page.eval('jsPsych.data.get().values()')));
   assert(data.every(d => d.at(-1).ended_reason === 'complete'), 'Did not reach completion');
+  if(exerciseTimeout) {
+    assert(warningChecked, 'Timer warning did not appear on both clients');
+    assert(feedbackChecked, 'Neutral timeout feedback missing');
+    for(const rows of data) {
+      const first = rows.filter(r => r.trial_type === 'multiplayer-reference-game');
+      assert.equal(first[0].round_result, 'incorrect');
+      assert.equal(first[1].round_result, 'timeout'); assert.equal(first[1].correct, null);
+    }
+  }
+  for (const rows of data) {
+    const game = rows.filter(r => r.trial_type === 'multiplayer-reference-game');
+    const practice = game.filter(r => r.phase === 'practice');
+    const main = game.filter(r => r.phase === 'main');
+    if (practice.length) {
+      assert.equal(practice.length, 2); assert.equal(main.length, 18);
+      assert.equal(new Set(game.map(r => r.coordination_round_id ?? r.round)).size, 20);
+      assert(practice.every(r => !main.some(m => m.targets[0] === r.targets[0])));
+      assert.equal(rows.at(-1).n_trials_played, 18);
+      assert.equal(rows.at(-1).n_practice_played, 2);
+      const walkthrough = rows.find(r => r.value?.instruction_screen === 'interface_walkthrough');
+      assert.equal(walkthrough.value.walkthrough_steps.length, 7);
+      assert.equal(main[0].main_round, 0);
+    }
+  }
   await writeFile(resolve(out, 'results.json'), JSON.stringify(data, null, 2));
   console.log(`PASS two-tab completion; datasets/screen captures: ${out}`);
 } finally {

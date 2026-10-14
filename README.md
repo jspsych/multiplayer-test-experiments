@@ -1,5 +1,11 @@
 # multiplayer-test-experiments
 
+This review branch adds [gameplay clarity](GAMEPLAY-CLARITY.md) and
+[a role-specific interface walkthrough plus two paired practice rounds](WALKTHROUGH-PRACTICE.md).
+Practice targets are excluded from the 18 main trials; saved data distinguishes the
+two phases. The shared `test/hawkins-integration` preview and its archive are unchanged.
+The historical coordination evidence below describes earlier builds.
+
 This branch is the public Hawkins coordination integration packet. See
 [design](PUBLIC-COORDINATION-INTEGRATION.md) and [operator checks](PUBLIC-COORDINATION-OPERATOR.md).
 Validation DataPipe is disabled. The frozen facade and MindProbe evidence remain
