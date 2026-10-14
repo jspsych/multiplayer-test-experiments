@@ -110,26 +110,49 @@
       const remaining = dialog.querySelector(".presence-check-remaining");
 
       let shownAt = null;
+      let previousFocus = null;
       const monitor = createPresenceMonitor({
         promptAfter,
         respondWithin,
         now: () => performance.now(),
         onShow: () => {
           shownAt = performance.now();
+          previousFocus = document.activeElement;
           dialog.hidden = false;
           button.focus({ preventScroll: true });
         },
-        onHide: () => {
+        onHide: (outcome) => {
           shownAt = null;
           dialog.hidden = true;
+          // Feedback and trial teardown must not refocus controls from the finished round.
+          if (outcome !== "interrupted" && !paused() && previousFocus?.isConnected &&
+              !previousFocus.matches(":disabled, [inert], [inert] *") &&
+              previousFocus.getClientRects().length > 0) {
+            previousFocus.focus({ preventScroll: true });
+          }
+          previousFocus = null;
         },
       });
       const onActivity = () => monitor.activity();
       const onClick = () => monitor.respond();
+      // The reminder has one control. Both Tab directions stay on it, and focus cannot move
+      // into the underlying round while the modal is open.
+      const onKeydown = (event) => {
+        if (monitor.isOpen && event.key === "Tab") {
+          event.preventDefault();
+          event.stopPropagation();
+          button.focus({ preventScroll: true });
+        }
+      };
+      const onFocus = (event) => {
+        if (monitor.isOpen && !dialog.contains(event.target)) button.focus({ preventScroll: true });
+      };
       for (const type of ACTIVITY_EVENTS) {
         document.addEventListener(type, onActivity, { capture: true, passive: true });
       }
       button.addEventListener("click", onClick);
+      document.addEventListener("keydown", onKeydown, true);
+      document.addEventListener("focusin", onFocus, true);
       const interval = setInterval(() => {
         monitor.tick(paused());
         if (shownAt != null) {
@@ -138,7 +161,7 @@
         }
       }, TICK_MS);
 
-      this.state = { monitor, dialog, interval, onActivity, onClick, button };
+      this.state = { monitor, dialog, interval, onActivity, onClick, onKeydown, onFocus, button };
     }
 
     on_finish() {
@@ -151,6 +174,8 @@
         document.removeEventListener(type, s.onActivity, { capture: true });
       }
       s.button.removeEventListener("click", s.onClick);
+      document.removeEventListener("keydown", s.onKeydown, true);
+      document.removeEventListener("focusin", s.onFocus, true);
       s.dialog.remove();
       return s.monitor.summary();
     }
