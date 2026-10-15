@@ -47,5 +47,5 @@ test("comprehension retries preserve attempts, save answers, and release only af
   assert.deepEqual(saves, ["comprehension-1", "comprehension-2"]);
   context.CONFIG.COMPREHENSION_CHECK = false;
   assert.equal(check.conditional_function(), false);
-  assert.match(html, /generalInstructions,\s+comprehensionLoop,\s+waitingRoom,/);
+  assert.match(html, /\[generalInstructions, comprehensionLoop\]\),\s+connectTrial,\s+waitingRoom,/);
 });

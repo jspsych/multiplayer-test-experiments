@@ -140,7 +140,9 @@
     //      partner's message, which is the stricter reading and, judging by the source comment, the
     //      intended one.
     //   4. Short general instructions before the lobby, and a role recap after pairing.
-    //      A comprehension check repeats with corrective feedback before the lobby.
+    //      A comprehension check repeats with corrective feedback before the lobby. The page
+    //      connects to the multiplayer session only after both, so nobody is paired while still
+    //      reading.
     //
     // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
     // correct, rt.
@@ -165,8 +167,6 @@
       NO_MATCH_PAYMENT_USD: 1.25,
       LOBBY_TIMEOUT_MS: 5 * 60000,
       PAIRING_TIMEOUT_MS: 30000,
-      // Wait for both participants to finish instructions/quiz before starting role assignment.
-      PREPARATION_TIMEOUT_MS: 5 * 60000,
       // How long to wait after the role recap for the partner to press Continue before giving up
       // and routing to the no-match exit. Without this barrier the faster reader would start round
       // 1 (and its 60s timer) alone while the partner is still reading, desyncing the two timelines.
@@ -195,7 +195,7 @@
     const jsPsych = initJsPsych();
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
-    // Built after connecting, from the session's shared randomness (see start()).
+    // Built after connecting, from the session's shared randomness (see connectSession()).
     let SCHEDULE = [];
 
     // Identity, captured once connected, for the DataPipe envelope. Every jsPsych row recorded while
@@ -219,7 +219,6 @@
       deployment: onJatos ? "jatos" : "local",
       config_blocks: CONFIG.BLOCKS,
       config_comprehension_check: CONFIG.COMPREHENSION_CHECK,
-      config_preparation_timeout_ms: CONFIG.PREPARATION_TIMEOUT_MS,
       config_n_stimuli: SHAPES.length,
       config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
       viewport_w: window.innerWidth,
@@ -471,7 +470,7 @@
     //   Local: one link per dyad (`?mp_session=`), and a local group is never sealed, so wait until
     //          two tabs are connected. Open exactly two tabs per session.
     let lobbyTicker = null;
-    const waitingRoom = {
+    const waitingTrial = {
       type: jsPsychCallFunction,
       async: true,
       func: (done) => {
@@ -533,52 +532,9 @@
       },
     };
 
-    const preparationBarrier = {
-      timeline: [{
-        type: jsPsychCallFunction,
-        async: true,
-        func: (done) => {
-          const startedAt = Date.now();
-          jsPsych.getDisplayElement().innerHTML =
-            `<p>Waiting for your partner to finish the instructions and questions…</p>
-             <p>If we cannot start within ${Math.round(CONFIG.PREPARATION_TIMEOUT_MS / 60000)} minutes,
-                we will end the study and still pay you ${money(CONFIG.NO_MATCH_PAYMENT_USD)} for your time.</p>`;
-          let finished = false;
-          const finish = (reason) => {
-            if (finished) return;
-            finished = true;
-            clearInterval(ticker);
-            if (reason) noMatchReason = reason;
-            done({ preparation_result: reason ?? "prepared", preparation_wait_ms: Date.now() - startedAt });
-          };
-          const ticker = setInterval(() => {
-            try {
-              const members = jsPsych.multiplayer.group().members;
-              const presence = jsPsych.multiplayer.presence();
-              const state = jsPsych.multiplayer.getAll({ scope: "session" });
-              if (members.some((id) => presence[id] === "left")) {
-                finish("partner_left_before_start");
-                return;
-              }
-              if (members.length === MIN_PLAYERS && members.every((id) =>
-                presence[id] === "connected" && state[id]?.prepared === true)) {
-                finish(null);
-                return;
-              }
-            } catch {
-              // Unreadable state must not start pairing; the deadline still bounds the wait.
-            }
-            if (Date.now() - startedAt >= CONFIG.PREPARATION_TIMEOUT_MS) finish("partner_not_ready");
-          }, 500);
-          try {
-            Promise.resolve(jsPsych.multiplayer.update({ prepared: true }, { scope: "session" }))
-              .catch(() => {});
-          } catch {
-            // A failed write also remains bounded by the preparation deadline.
-          }
-        },
-      }],
-      conditional_function: () => !noMatchReason,
+    const waitingRoom = {
+      timeline: [waitingTrial],
+      conditional_function: () => !noMatchReason && !reloaded,
     };
 
     // Fixed director/matcher for the whole game, drawn from the session's shared randomness, so
@@ -604,7 +560,7 @@
 
     const pairingPhase = {
       timeline: [roleTrial],
-      conditional_function: () => !noMatchReason,
+      conditional_function: () => !noMatchReason && !reloaded,
     };
 
     const roleRecap = {
@@ -659,11 +615,15 @@
     };
 
     // Ready barrier: both partners enter the game together. Each side merges a ready flag and
-    // polls until both are present, so nobody starts round 1 (and its 60s timer) while the partner
-    // is still reading. A plain poll rather than the multiplayer-sync plugin: core wait() rejects
-    // when a participant leaves, and that rejection has no handler inside a plugin trial, while here
-    // every outcome (matched, timed out) lands on exactly one terminal state. The copy stays neutral
-    // about who is at fault because a timeout can also mean our own connection dropped.
+    // polls until both pair members are connected and ready, so nobody starts round 1 (and its 60s
+    // timer) while the partner is still reading. A plain poll rather than the multiplayer-sync
+    // plugin: core wait() rejects when a participant leaves, and that rejection has no handler
+    // inside a plugin trial, while here every outcome lands on exactly one terminal state.
+    //   • A partner who has left ends the wait at once (partner_left_before_start).
+    //   • A disconnected partner, or unreadable state, never counts as ready: the wait fails closed
+    //     and the deadline bounds it.
+    //   • On timeout this side withdraws its flag before leaving, so a partner who becomes ready at
+    //     the deadline is less likely to start alone on a stale flag.
     const readyTrial = {
       type: jsPsychCallFunction,
       async: true,
@@ -674,48 +634,44 @@
           <p style="font-size:0.9em;color:#555">The game starts for both of you as soon as everyone
              has continued.</p>`;
         let finished = false;
-        const finish = (data) => {
+        const finish = (result) => {
           if (finished) return;
           finished = true;
           clearInterval(ticker);
-          done(data);
+          if (result !== "matched") noMatchReason = result;
+          done({ waiting_ready: result, ready_wait_ms: Date.now() - startedAt });
+        };
+        const setReady = (ready) => {
+          // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
+          // replace would wipe. Guarded both ways so a failed write can never skip the ticker.
+          try {
+            Promise.resolve(jsPsych.multiplayer.update({ ready }, { scope: "session" })).catch(() => {});
+          } catch {
+            // Synchronous failure (e.g. closed session): the deadline still ends the wait.
+          }
         };
         const ticker = setInterval(() => {
-          let state = {};
           try {
-            state = jsPsych.multiplayer.getAll({ scope: "session" }) ?? {};
+            const state = jsPsych.multiplayer.getAll({ scope: "session" }) ?? {};
+            const presence = jsPsych.multiplayer.presence() ?? {};
+            if (presence[partnerId] === "left") {
+              finish("partner_left_before_start");
+              return;
+            }
+            const pair = [participantId, partnerId];
+            if (pair.every((id) => id && presence[id] === "connected" && state[id]?.ready === true)) {
+              finish("matched");
+              return;
+            }
           } catch {
-            // Unreadable state looks like an empty room: keep waiting for the timeout.
+            // Unreadable state must not start the game; the deadline still bounds the wait.
           }
-          let presence = {};
-          try {
-            presence = jsPsych.multiplayer.presence() ?? {};
-          } catch {
-            // Unreadable presence: count every ready flag rather than stalling the barrier.
-          }
-          // Ignore ready flags from participants who have since left, so a stale flag can't start
-          // the game solo. An unreadable presence map counts everything (fail open toward starting).
-          const hasPresence = Object.keys(presence).length > 0;
-          const ready = Object.entries(state).filter(
-            ([id, s]) => s && s.ready === true && (!hasPresence || presence[id] !== "left"),
-          ).length;
-          if (ready >= MIN_PLAYERS) {
-            finish({ waiting_ready: "matched", ready_wait_ms: Date.now() - startedAt });
-          } else if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
-            noMatchReason = "partner_not_ready";
-            finish({ waiting_ready: noMatchReason, ready_wait_ms: Date.now() - startedAt });
+          if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
+            setReady(false);
+            finish("partner_not_ready");
           }
         }, 500);
-        // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
-        // replace would wipe. Guarded both ways so a failed write can never skip the ticker above:
-        // the timeout still ends the wait.
-        try {
-          Promise.resolve(
-            jsPsych.multiplayer.update({ ready: true }, { scope: "session" }),
-          ).catch(() => {});
-        } catch {
-          // Synchronous failure (e.g. closed session): keep waiting for the timeout.
-        }
+        setReady(true);
       },
     };
 
@@ -796,8 +752,8 @@
 
     const gameLoop = {
       timeline: [gameRound],
-      timeline_variables: SCHEDULE, // replaced in start(), once the schedule exists
-      conditional_function: () => !noMatchReason,
+      timeline_variables: SCHEDULE, // replaced in connectSession(), once the schedule exists
+      conditional_function: () => !noMatchReason && !reloaded,
     };
 
     // ---- Terminal screen ------------------------------------------------------------------------
@@ -905,7 +861,7 @@
       },
     };
 
-    // ---- Start ----------------------------------------------------------------------------------
+    // ---- Connecting -----------------------------------------------------------------------------
 
     function adapter() {
       return onJatos
@@ -914,6 +870,66 @@
           // is detected as a restart instead of the tab joining as a third participant.
           new jsPsychAdapterMultiplayerLocal();
     }
+
+    // Set once this tab has joined a session. A reload then skips the instructions and quiz it has
+    // already passed, so a participant who reloads mid-game reaches the reload exit straight away.
+    const CONNECTED_KEY = "hawkins-connected";
+    let resumed = false;
+    try {
+      resumed = sessionStorage.getItem(CONNECTED_KEY) === "1";
+    } catch {
+      // Storage unavailable: a reload replays the instructions before reaching the reload exit.
+    }
+
+    async function connectSession() {
+      try {
+        await jsPsych.multiplayer.connect(adapter(), {
+          dropoutTimeout: CONFIG.DROPOUT_TIMEOUT_MS,
+          reconnectTimeout: CONFIG.RECONNECT_GIVE_UP_MS,
+        });
+      } catch (error) {
+        console.error("Could not connect to the multiplayer session", error);
+        noMatchReason = "connect_error";
+        return { connection: noMatchReason };
+      }
+      try {
+        sessionStorage.setItem(CONNECTED_KEY, "1");
+      } catch {
+        // See `resumed` above.
+      }
+
+      participantId = jsPsych.multiplayer.participantId;
+      dyadId = jsPsych.multiplayer.sessionId;
+
+      if (jsPsych.multiplayer.restarted) {
+        reloaded = true;
+        return { connection: "restarted" };
+      }
+
+      SCHEDULE = Hawkins.sequentialSchedule(
+        CONFIG.BLOCKS,
+        SHAPES.map((s) => s.id),
+        (key, array) => jsPsych.multiplayer.shuffle(key, array),
+      );
+      // jsPsych reads a timeline's timeline_variables when that timeline starts, so setting it here,
+      // before the game loop is reached, takes effect.
+      gameLoop.timeline_variables = SCHEDULE;
+      jsPsych.data.addProperties({ config_trials: SCHEDULE.length });
+      return { connection: "connected" };
+    }
+
+    // Connects only after the instructions and quiz, so the lobby pairs participants who are ready
+    // to play and nobody's pairing timeout runs while their partner is still reading.
+    const connectTrial = {
+      type: jsPsychCallFunction,
+      async: true,
+      func: (done) => {
+        jsPsych.getDisplayElement().innerHTML = "<p>Connecting…</p>";
+        connectSession().then(done);
+      },
+    };
+
+    // ---- Start ----------------------------------------------------------------------------------
 
     async function start() {
       const params = studyLinkParams();
@@ -928,41 +944,11 @@
         session_id: prolific.session,
       });
 
-      try {
-        await jsPsych.multiplayer.connect(adapter(), {
-          dropoutTimeout: CONFIG.DROPOUT_TIMEOUT_MS,
-          reconnectTimeout: CONFIG.RECONNECT_GIVE_UP_MS,
-        });
-      } catch (error) {
-        console.error("Could not connect to the multiplayer session", error);
-        noMatchReason = "connect_error";
-        await jsPsych.run([terminalScreen]);
-        return;
-      }
-
-      participantId = jsPsych.multiplayer.participantId;
-      dyadId = jsPsych.multiplayer.sessionId;
-
-      if (jsPsych.multiplayer.restarted) {
-        reloaded = true;
-        await jsPsych.run([terminalScreen]);
-        return;
-      }
-
-      SCHEDULE = Hawkins.sequentialSchedule(
-        CONFIG.BLOCKS,
-        SHAPES.map((s) => s.id),
-        (key, array) => jsPsych.multiplayer.shuffle(key, array),
-      );
-      gameLoop.timeline_variables = SCHEDULE;
-      jsPsych.data.addProperties({ config_trials: SCHEDULE.length });
-
       await jsPsych.run([
         preloadTrial,
-        generalInstructions,
-        comprehensionLoop,
+        ...(resumed ? [] : [generalInstructions, comprehensionLoop]),
+        connectTrial,
         waitingRoom,
-        preparationBarrier,
         pairingPhase,
         roleRecap,
         readyBarrier,
