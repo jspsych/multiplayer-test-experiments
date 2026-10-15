@@ -188,7 +188,9 @@
     //      partner's message, which is the stricter reading and, judging by the source comment, the
     //      intended one.
     //   4. Short general instructions before the lobby, and a role recap after pairing.
-    //      Still no comprehension quiz.
+    //      A comprehension check repeats with corrective feedback before the lobby. The page
+    //      connects to the multiplayer session only after both, so nobody is paired while still
+    //      reading.
     //
     // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
     // correct, rt.
@@ -200,13 +202,15 @@
       PILOT_LABEL: "hawkins-18-trial-paid-pilot",
       BLOCKS: 3,
       TARGETS_PER_BLOCK: 6, // random subset per dyad; all 12 shapes remain visible
-      // Replace these placeholders with real Prolific codes before the paid run. The placeholder
-      // allows testing the redirect, but is not a valid Prolific completion code.
+      COMPREHENSION_CHECK: true,
+      // Replace these placeholders with real Prolific codes before the paid run. A placeholder
+      // (Hawkins.PLACEHOLDER_CODES) is shown as a test code and lets a test run try the redirect, but
+      // Prolific will not accept it, so scripts/make-jzip.mjs refuses to build the JATOS archive
+      // while any code is empty or a placeholder (unless run with --allow-placeholder-codes).
       COMPLETION_CODES: {
         complete: "insertcodehere",
-        partner_dropped: "insertcodehere", // partner left or went idle, or connection was lost
+        partner_dropped: "insertcodehere", // partner left, or this participant's connection was lost
         no_match: "insertcodehere", // never got a partner
-        inactive: "insertcodehere", // unused: timeouts no longer end the game
         reloaded: "insertcodehere", // this participant reloaded the page mid-session
       },
       PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
@@ -232,36 +236,49 @@
       // and the round ends with "connection_lost". The core's default is to retry forever, which
       // leaves a JATOS participant whose channel the server closed stuck on "reconnecting".
       RECONNECT_GIVE_UP_MS: 60000,
-      // Create a Google Drive experiment at pipe.jspsych.org and paste its 12-character ID here.
+      // Google Drive-backed DataPipe study created primarily for testing. It may also be used
+      // for the main study; collaborators can create their own study and replace this ID.
       // Empty disables DataPipe; JATOS result data is still saved independently.
-      DATAPIPE_EXPERIMENT_ID: "",
+      // DataPipe runs only when the page is served by JATOS. A local run uploads nothing unless its
+      // URL opts in with `?datapipe=1`, so dev and test runs stay out of the study's Drive folder.
+      DATAPIPE_EXPERIMENT_ID: "wE2Zlitn0uhu",
       JATOS_SAVE_PER_ROUND: true,
+      // How long the terminal screen says "Saving…" before telling the participant they can submit
+      // while the upload finishes in the background. The exit message and submit controls appear
+      // at once either way; this bounds only the status line.
+      SAVE_STATUS_BUDGET_MS: 3000,
     };
 
     const onJatos = typeof jatos !== "undefined" && typeof jatos.onLoad === "function";
+    const datapipeEnabled =
+      Boolean(CONFIG.DATAPIPE_EXPERIMENT_ID) &&
+      (onJatos || new URLSearchParams(location.search).get("datapipe") === "1");
 
-    // An opaque filename avoids putting Prolific, participant, or dyad identifiers in DataPipe's
-    // staging metadata. Those identifiers remain in the saved trial rows.
-    const datapipeFilename = `${crypto.randomUUID()}.json`;
-    let pipeSaveResult = { skipped: true };
+    // Settles with the extension's final-save result. The extension makes that save after the
+    // timeline ends and sets no timeout on it, so the terminal screen never waits for it (see
+    // showTerminalScreen).
+    let resolvePipeSave = null;
+    const pipeSaved = datapipeEnabled
+      ? new Promise((resolve) => { resolvePipeSave = resolve; })
+      : Promise.resolve({ skipped: true });
     const jsPsych = initJsPsych({
       extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,
         params: {
           experiment_id: CONFIG.DATAPIPE_EXPERIMENT_ID,
-          filename: datapipeFilename,
+          // An opaque filename keeps Prolific, participant, and dyad IDs out of DataPipe's staging
+          // metadata; they remain in the saved trial rows. The extension resolves it once, at the
+          // start. randomID, unlike the Web Crypto UUID API, also works outside a secure context.
+          filename: () => `${jsPsych.randomization.randomID(32)}.json`,
           format: "json",
-          enabled: Boolean(CONFIG.DATAPIPE_EXPERIMENT_ID),
-          on_save: (result) => { pipeSaveResult = result; },
+          enabled: datapipeEnabled,
+          on_save: (result) => resolvePipeSave?.(result),
         },
       }],
-      // The extension uploads before invoking this callback. Keep the final Prolific controls here
-      // so a navigation cannot interrupt the full-data upload.
-      on_finish: showTerminalScreen,
     });
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
-    // Built after connecting, from the session's shared randomness (see start()).
+    // Built after connecting, from the session's shared randomness (see connectSession()).
     let SCHEDULE = [];
 
     // Identity, captured once connected. Every jsPsych row recorded while connected gets these
@@ -285,6 +302,7 @@
       deployment: onJatos ? "jatos" : "local",
       config_blocks: CONFIG.BLOCKS,
       config_targets_per_block: CONFIG.TARGETS_PER_BLOCK,
+      config_comprehension_check: CONFIG.COMPREHENSION_CHECK,
       config_n_stimuli: SHAPES.length,
       config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
       viewport_w: window.innerWidth,
@@ -296,10 +314,11 @@
 
     (function warnOnUnsetConfig() {
       const unset = Object.entries(CONFIG.COMPLETION_CODES)
-        .filter(([, v]) => !v || v === "insertcodehere")
+        .filter(([, v]) => !Hawkins.isRealCode(v))
         .map(([k]) => k);
       if (unset.length) console.warn(`Unset Prolific completion code(s): ${unset.join(", ")}`);
       if (!CONFIG.DATAPIPE_EXPERIMENT_ID) console.warn("DataPipe experiment ID is unset.");
+      else if (!datapipeEnabled) console.info("DataPipe is off for this local run; add ?datapipe=1 to test it.");
     })();
 
     // ---- Session state --------------------------------------------------------------------------
@@ -354,11 +373,26 @@
 
     function submissionBlockHTML(codeKey) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
-      if (!code) return `<p>No completion code is configured. Please message the researcher.</p>`;
-      const testNotice = code === "insertcodehere"
-        ? `<p>This is a test completion code. The button tests the return to Prolific.</p>`
-        : "";
-      return `${testNotice}<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
+      if (!code) {
+        return `<p style="color:#b00"><strong>Something has gone wrong on our end.</strong> The
+                completion code for this exit
+                (<code>${codeKey}</code>) is missing, so the automatic submission cannot run.</p>
+                <p style="color:#b00">Please <strong>message the researcher from this study's page on
+                Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>. You will be
+                paid, so do not return the study. Please keep this tab open until you have sent it.</p>`;
+      }
+      if (Hawkins.isPlaceholderCode(code)) {
+        // A setup build: the button still tries the redirect, so a test run can check it.
+        return `<div class="test-code-notice" style="border:2px dashed #b00;padding:0.5em 1em;margin:1em auto;max-width:36em">
+                <p style="color:#b00"><strong>Test build: this is a placeholder completion code, not a
+                real one.</strong> Prolific will not accept <code>${code}</code>.</p>
+                <p>If you are taking part in the study, please <strong>message the researcher from this
+                study's page on Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>.
+                You will be paid, so do not return the study.</p>
+                <p><button id="prolific-submit" type="button">Test the return to Prolific</button></p>
+                </div>`;
+      }
+      return `<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
               <p style="font-size:0.9em">If that button does not work, your completion code is
               <code style="user-select:all">${code}</code>. Paste it into Prolific to submit.</p>`;
     }
@@ -419,6 +453,8 @@
          <li>The target is outlined in yellow, but only on the Director's screen.</li>
          <li>Both of you can chat freely (chat box below the shapes), but the Director must send
              at least one message before the Matcher can choose.</li>
+         <li>The shapes are arranged differently on your two screens. Describe the shape itself,
+             rather than its position.</li>
          <li>You have ${roundSeconds} seconds to describe and pick a tangram. A countdown on every
              trial shows the time remaining. If time runs out before the Matcher picks, you both
              see a "Time's up" message (the Matcher also sees the correct shape), then move on to
@@ -429,9 +465,86 @@
              Matcher picked a different one, their pick is outlined in blue.</li>
        </ul>
        <p>There are ${totalRounds} trials, with no breaks.</p>
-       <p>Next you will wait to be paired with a partner.</p>`,
+       <p>${CONFIG.COMPREHENSION_CHECK ? "Next, answer three quick questions about the task. Then you" : "Next you"}
+          will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
     );
+
+    // Use the existing call-function plugin so this check adds no browser dependencies.
+    // Keep the pass flag explicitly: feedback also creates a row, so last(1) is not the answer row.
+    let comprehensionPassed = false;
+    let comprehensionAttempt = 0;
+    const comprehensionQuestions = [
+      {
+        name: "target_visibility",
+        title: "Who sees the yellow target highlight during a round?",
+        choices: ["Both participants", "Only the Director", "Only the Matcher"],
+        answer: "Only the Director",
+        explanation: "Only the Director sees the yellow target highlight. The Matcher uses the Director's description.",
+      },
+      {
+        name: "click_gate",
+        title: "When can the Matcher click a shape?",
+        choices: ["As soon as the round starts", "After the Matcher sends a message in this round", "After the Director sends a message in this round"],
+        answer: "After the Director sends a message in this round",
+        explanation: "The Director must send at least one message each round before the Matcher can click. Both participants may ask questions or chat throughout.",
+      },
+      {
+        name: "layout",
+        title: "How should the Director identify the target to the Matcher?",
+        choices: ["Describe what the shape looks like", "Give its position on the Director's screen", "Tell the Matcher to choose the yellow shape"],
+        answer: "Describe what the shape looks like",
+        explanation: "The layouts differ between screens, and the Matcher cannot see the yellow highlight. Describe the shape itself rather than its position.",
+      },
+    ];
+    const comprehensionLoop = {
+      timeline: [
+        {
+          type: jsPsychCallFunction,
+          async: true,
+          func: (done) => {
+            const startedAt = performance.now();
+            comprehensionAttempt += 1;
+            const display = jsPsych.getDisplayElement();
+            display.innerHTML = `<form id="comprehension-form" style="max-width:40em;margin:2em auto;text-align:left;line-height:1.5">
+              <h2>Check your understanding</h2>
+              <p>Please answer all three questions. If you miss one, we'll explain it and you can try again.</p>
+              ${comprehensionQuestions.map((q) => `<fieldset style="margin:1em 0"><legend>${q.title}</legend>
+                ${jsPsych.randomization.shuffle(q.choices).map((choice) => `<label style="display:block;padding:0.3em">
+                  <input type="radio" name="${q.name}" value="${q.choices.indexOf(choice)}" required> ${choice}</label>`).join("")}
+              </fieldset>`).join("")}
+              <button type="submit">Check answers</button></form>`;
+            display.querySelector("form").addEventListener("submit", (event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const response = Object.fromEntries(comprehensionQuestions.map((q) =>
+                [q.name, q.choices[Number(form.get(q.name))]],
+              ));
+              const incorrect = comprehensionQuestions.filter((q) => response[q.name] !== q.answer);
+              comprehensionPassed = incorrect.length === 0;
+              done({ instruction_screen: "comprehension", comprehension_attempt: comprehensionAttempt,
+                comprehension_passed: comprehensionPassed, response,
+                incorrect_questions: incorrect.map((q) => q.name), rt: performance.now() - startedAt });
+            }, { once: true });
+          },
+          on_finish: () => saveProgress(`comprehension-${comprehensionAttempt}`),
+        },
+        {
+          type: jsPsychCallFunction,
+          async: true,
+          func: (done) => {
+            const feedback = comprehensionPassed
+              ? "<h2>Correct!</h2><p>You're ready to wait for a partner.</p>"
+              : `<h2>Please try again</h2><p>One or more answers were incorrect. Please remember:</p>
+                 <ul style="text-align:left">${comprehensionQuestions.map((q) => `<li>${q.explanation}</li>`).join("")}</ul>`;
+            continueScreen(feedback, { instruction_screen: "comprehension_feedback",
+              comprehension_attempt: comprehensionAttempt, comprehension_passed: comprehensionPassed }).func(done);
+          },
+        },
+      ],
+      conditional_function: () => CONFIG.COMPREHENSION_CHECK,
+      loop_function: () => !comprehensionPassed,
+    };
 
     const connectedCount = (presence) =>
       Object.values(presence).filter((status) => status === "connected").length;
@@ -443,7 +556,7 @@
     //   Local: one link per dyad (`?mp_session=`), and a local group is never sealed, so wait until
     //          two tabs are connected. Open exactly two tabs per session.
     let lobbyTicker = null;
-    const waitingRoom = {
+    const waitingTrial = {
       type: jsPsychCallFunction,
       async: true,
       func: (done) => {
@@ -505,6 +618,11 @@
       },
     };
 
+    const waitingRoom = {
+      timeline: [waitingTrial],
+      conditional_function: () => !noMatchReason && !reloaded,
+    };
+
     // Fixed director/matcher for the whole game, drawn from the session's shared randomness, so
     // both players compute the same assignment without a coordinator. On JATOS `group_size: null`
     // means the sealed group; locally it must be stated.
@@ -528,7 +646,7 @@
 
     const pairingPhase = {
       timeline: [roleTrial],
-      conditional_function: () => !noMatchReason,
+      conditional_function: () => !noMatchReason && !reloaded,
     };
 
     const roleRecap = {
@@ -583,11 +701,15 @@
     };
 
     // Ready barrier: both partners enter the game together. Each side merges a ready flag and
-    // polls until both are present, so nobody starts round 1 (and its 60s timer) while the partner
-    // is still reading. A plain poll rather than the multiplayer-sync plugin: core wait() rejects
-    // when a participant leaves, and that rejection has no handler inside a plugin trial, while here
-    // every outcome (matched, timed out) lands on exactly one terminal state. The copy stays neutral
-    // about who is at fault because a timeout can also mean our own connection dropped.
+    // polls until both pair members are connected and ready, so nobody starts round 1 (and its 60s
+    // timer) while the partner is still reading. A plain poll rather than the multiplayer-sync
+    // plugin: core wait() rejects when a participant leaves, and that rejection has no handler
+    // inside a plugin trial, while here every outcome lands on exactly one terminal state.
+    //   • A partner who has left ends the wait at once (partner_left_before_start).
+    //   • A disconnected partner, or unreadable state, never counts as ready: the wait fails closed
+    //     and the deadline bounds it.
+    //   • On timeout this side withdraws its flag before leaving, so a partner who becomes ready at
+    //     the deadline is less likely to start alone on a stale flag.
     const readyTrial = {
       type: jsPsychCallFunction,
       async: true,
@@ -598,48 +720,44 @@
           <p style="font-size:0.9em;color:#555">The game starts for both of you as soon as everyone
              has continued.</p>`;
         let finished = false;
-        const finish = (data) => {
+        const finish = (result) => {
           if (finished) return;
           finished = true;
           clearInterval(ticker);
-          done(data);
+          if (result !== "matched") noMatchReason = result;
+          done({ waiting_ready: result, ready_wait_ms: Date.now() - startedAt });
+        };
+        const setReady = (ready) => {
+          // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
+          // replace would wipe. Guarded both ways so a failed write can never skip the ticker.
+          try {
+            Promise.resolve(jsPsych.multiplayer.update({ ready }, { scope: "session" })).catch(() => {});
+          } catch {
+            // Synchronous failure (e.g. closed session): the deadline still ends the wait.
+          }
         };
         const ticker = setInterval(() => {
-          let state = {};
           try {
-            state = jsPsych.multiplayer.getAll({ scope: "session" }) ?? {};
+            const state = jsPsych.multiplayer.getAll({ scope: "session" }) ?? {};
+            const presence = jsPsych.multiplayer.presence() ?? {};
+            if (presence[partnerId] === "left") {
+              finish("partner_left_before_start");
+              return;
+            }
+            const pair = [participantId, partnerId];
+            if (pair.every((id) => id && presence[id] === "connected" && state[id]?.ready === true)) {
+              finish("matched");
+              return;
+            }
           } catch {
-            // Unreadable state looks like an empty room: keep waiting for the timeout.
+            // Unreadable state must not start the game; the deadline still bounds the wait.
           }
-          let presence = {};
-          try {
-            presence = jsPsych.multiplayer.presence() ?? {};
-          } catch {
-            // Unreadable presence: count every ready flag rather than stalling the barrier.
-          }
-          // Ignore ready flags from participants who have since left, so a stale flag can't start
-          // the game solo. An unreadable presence map counts everything (fail open toward starting).
-          const hasPresence = Object.keys(presence).length > 0;
-          const ready = Object.entries(state).filter(
-            ([id, s]) => s && s.ready === true && (!hasPresence || presence[id] !== "left"),
-          ).length;
-          if (ready >= MIN_PLAYERS) {
-            finish({ waiting_ready: "matched", ready_wait_ms: Date.now() - startedAt });
-          } else if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
-            noMatchReason = "partner_not_ready";
-            finish({ waiting_ready: noMatchReason, ready_wait_ms: Date.now() - startedAt });
+          if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
+            setReady(false);
+            finish("partner_not_ready");
           }
         }, 500);
-        // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
-        // replace would wipe. Guarded both ways so a failed write can never skip the ticker above:
-        // the timeout still ends the wait.
-        try {
-          Promise.resolve(
-            jsPsych.multiplayer.update({ ready: true }, { scope: "session" }),
-          ).catch(() => {});
-        } catch {
-          // Synchronous failure (e.g. closed session): keep waiting for the timeout.
-        }
+        setReady(true);
       },
     };
 
@@ -651,8 +769,28 @@
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
+    // True while the current round shows feedback. The plugin enters feedback when the matcher's
+    // submission reaches the round's shared data (Hawkins.roundHasSubmission), on both clients and
+    // whether or not it renders any feedback text, so read that rather than the feedback DOM. Outside
+    // a trial, or once the session has closed, the read throws and this is false.
+    function inFeedbackPhase() {
+      return roundSubmissionNow() !== null;
+    }
+
+    // The matcher's submitted choice for the current round (`timed_out: true` when the
+    // selection_timeout made it), or null before feedback and outside a trial.
+    function roundSubmissionNow() {
+      try {
+        return Hawkins.roundSubmission(jsPsych.multiplayer.getAll({ scope: "trial" }));
+      } catch {
+        return null;
+      }
+    }
+
     let roundCountdownInterval = null;
-    let roundFeedbackShown = false;
+    // Shares, and on the director receives, how many director messages had reached the matcher by
+    // the deadline (Hawkins.createDeadlineWitness). Replaced every round in on_load.
+    let deadlineWitness = null;
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -716,38 +854,55 @@
       },
       on_load: () => {
         // The plugin starts its wall-clock timers during synchronous trial setup, just before
-        // jsPsych calls on_load. Stop this display when feedback begins or the trial ends.
-        // The plugin disables the chat input exactly when feedback starts (chat is otherwise
-        // always open here), and a timed-out round reaches feedback with no cell marked as picked.
-        const P = ".jspsych-multiplayer-reference-game";
+        // jsPsych calls on_load. Stop this display when feedback begins (inFeedbackPhase) or the
+        // trial ends. A submission the selection_timeout made carries `timed_out: true`.
         const remaining = document.getElementById("round-remaining");
         const note = document.getElementById("round-note");
-        const chatInput = document.querySelector(`${P}-chat-input`);
         const deadline = Date.now() + CONFIG.ROUND_TIMEOUT_MS;
-        roundFeedbackShown = false;
+        const witness = Hawkins.createDeadlineWitness(myRole, participantId, partnerId);
+        deadlineWitness = witness;
+        try {
+          // Ends with the trial. On the matcher, the callback runs in the same update that delivers
+          // its submission and starts its feedback, so the count is what the matcher had received.
+          jsPsych.multiplayer.subscribe((group) => {
+            const count = witness.observe(group);
+            if (count === null) return;
+            Promise.resolve()
+              .then(() => jsPsych.multiplayer.update({ [Hawkins.DEADLINE_COUNT_KEY]: count }, { scope: "trial" }))
+              .catch(() => {}); // a closed session ends the round anyway
+          }, { scope: "trial" });
+        } catch (error) {
+          console.error("Could not watch the round's shared data", error);
+        }
+        const showTimeoutNote = () => {
+          // Who didn't act: the matcher's shared count once known, else this side's own view.
+          let described = witness.count;
+          if (described === null) {
+            const own = document.querySelectorAll(".jspsych-multiplayer-reference-game-chat-message.is-self").length;
+            const all = document.querySelectorAll(".jspsych-multiplayer-reference-game-chat-message").length;
+            described = myRole === "director" ? own : all - own;
+          }
+          const cause = described > 0
+            ? "The Matcher didn't pick a shape this round."
+            : "The Director didn't send a description this round.";
+          note.textContent =
+            myRole === "matcher"
+              ? `Time's up! ${cause} The correct shape is outlined in green.`
+              : `Time's up! ${cause}`;
+          note.classList.add("is-timeout");
+          return witness.count !== null;
+        };
         const update = () => {
-          if (chatInput?.disabled) {
-            roundFeedbackShown = true;
-            const picked = document.querySelector(`${P}-cell.is-correct, ${P}-cell.is-wrong`);
-            if (picked) {
-              remaining.textContent = "Selection complete";
-            } else {
-              remaining.textContent = "Time's up";
-              const own = document.querySelectorAll(`${P}-chat-message.is-self`).length;
-              const all = document.querySelectorAll(`${P}-chat-message`).length;
-              const described = (myRole === "director" ? own : all - own) > 0;
-              const cause = described
-                ? "The Matcher didn't pick a shape this round."
-                : "The Director didn't send a description this round.";
-              note.textContent =
-                myRole === "matcher"
-                  ? `Time's up! ${cause} The correct shape is outlined in green.`
-                  : `Time's up! ${cause}`;
-              note.classList.add("is-timeout");
-            }
+          const submission = roundSubmissionNow();
+          if (!submission) {
+            remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
+          } else if (!submission.timed_out) {
+            remaining.textContent = "Selection complete";
             clearInterval(countdownInterval);
           } else {
-            remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
+            remaining.textContent = "Time's up";
+            // Keep refreshing the note until the matcher's count arrives (at once on the matcher).
+            if (showTimeoutNote()) clearInterval(countdownInterval);
           }
         };
         const countdownInterval = window.setInterval(update, 200);
@@ -757,15 +912,12 @@
       on_finish: (data) => {
         clearInterval(roundCountdownInterval);
         roundCountdownInterval = null;
-        Object.assign(data, Hawkins.classifyRound(data), {
-          feedback_shown: roundFeedbackShown,
-          timeout_source:
-            data.multiplayer_outcome !== "timeout"
-              ? null
-              : roundFeedbackShown
-              ? "selection_timeout"
-              : "round_timeout",
-        });
+        // feedback_shown and timeout_source come from the plugin's data (see classifyRound), not
+        // from the display poll above, which a throttled background tab can miss.
+        Object.assign(data, Hawkins.classifyRound(data, {
+          directorMessagesByDeadline: deadlineWitness?.count ?? null,
+        }));
+        deadlineWitness = null;
         if (CONFIG.JATOS_SAVE_PER_ROUND) saveProgress();
 
         // Timeouts never end the game; only a disconnection does.
@@ -780,8 +932,8 @@
 
     const gameLoop = {
       timeline: [gameRound],
-      timeline_variables: SCHEDULE, // replaced in start(), once the schedule exists
-      conditional_function: () => !noMatchReason,
+      timeline_variables: SCHEDULE, // replaced in connectSession(), once the schedule exists
+      conditional_function: () => !noMatchReason && !reloaded,
     };
 
     // ---- Terminal screen ------------------------------------------------------------------------
@@ -811,24 +963,14 @@
             <p><strong>You will still be paid ${money(CONFIG.NO_MATCH_PAYMENT_USD)} for your
                time.</strong></p>`;
         case "partner_left":
-        case "inactive_partner":
           return `<h2>Your partner stopped responding</h2>
-            <p>${
-              exit === "partner_left"
-                ? "Your partner disconnected"
-                : "Your partner stopped taking part"
-            }, so we have ended the study here.
+            <p>Your partner disconnected, so we have ended the study here.
                <strong>This is not your fault, and your payment is not affected.</strong></p>
             ${progress}`;
         case "connection_lost":
           return `<h2>We lost the connection to the game</h2>
             <p>Your connection to the game server dropped and did not come back, so we have ended
                the study here. <strong>Your payment is not affected.</strong></p>
-            ${progress}`;
-        // Unreachable while timeouts never end the game; kept so every routed exit has a message.
-        case "inactive_self":
-          return `<h2>The game has ended</h2>
-            <p>The game ended because you stopped taking part.</p>
             ${progress}`;
         case "complete": {
           const correct = completedRounds().filter({ correct: true }).count();
@@ -846,40 +988,65 @@
       const el = document.getElementById("save-status");
       if (!el) return;
       el.textContent = result.skipped
-        ? "DataPipe is not configured; this run is a local or JATOS test."
+        ? "Nothing was uploaded: DataPipe is off for local runs (add ?datapipe=1 to test it)."
         : result.ok
         ? "Your responses have been saved."
-        : "The final upload was not accepted. Your completed trials may be recoverable; please submit anyway and message the researcher.";
+        : result.timedOut
+        ? "Still uploading. You can submit now; the upload will finish in the background."
+        : "The final upload was not accepted. Please submit anyway and message the researcher.";
     }
 
-    const terminalScreen = {
-      type: jsPsychCallFunction,
-      func: () => {
-        const { exit } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
-        recordOutcome(exit);
-        if (jsPsych.multiplayer.status) jsPsych.multiplayer.disconnect();
-        return exit;
-      },
-    };
-
-    async function showTerminalScreen() {
-      const { exit, codeKey } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
-      const jatosResult = JatosSink ? await JatosSink.submit() : { skipped: true };
-      jsPsych.getDisplayElement().innerHTML = `${exitMessage(exit)}
-        <p id="save-status" style="font-size:0.9em;color:#666"></p>
+    // The terminal screen shows the exit message and the submit controls at once, and never waits
+    // on a save. It renders beside jsPsych's display element, which it hides: once the timeline
+    // ends, the Pipe extension writes its "Saving data" message into that element and then awaits
+    // Firebase and pipe.jspsych.org with no timeout, which on a lost connection can be forever.
+    // The status line follows the saves and gives up waiting after SAVE_STATUS_BUDGET_MS.
+    function showTerminalScreen(exit, codeKey) {
+      const display = jsPsych.getDisplayElement();
+      const screen = document.createElement("div");
+      screen.id = "terminal-screen";
+      screen.className = "jspsych-content";
+      screen.innerHTML = `${exitMessage(exit)}
+        <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
         ${submissionBlockHTML(codeKey)}
         ${onJatos ? "" : `<p style="font-size:0.85em;color:#666">Researcher tools:
           <button id="dl" type="button">Download data (JSON)</button></p>`}`;
-      showSaveStatus(Hawkins.combineSaveResults([pipeSaveResult, jatosResult]));
+      display.style.display = "none";
+      display.after(screen);
       document.getElementById("prolific-submit")?.addEventListener("click", () =>
         submitToProlific(codeKey, exit === "complete"),
       );
       document.getElementById("dl")?.addEventListener("click", () =>
         jsPsych.data.get().localSave("json", "reference-game-hawkins-data.json"),
       );
+
+      let settled = false;
+      const budget = setTimeout(() => {
+        if (!settled) showSaveStatus({ ok: false, timedOut: true });
+      }, CONFIG.SAVE_STATUS_BUDGET_MS);
+      Promise.all([JatosSink ? JatosSink.submit() : { skipped: true }, pipeSaved]).then((results) => {
+        settled = true;
+        clearTimeout(budget);
+        showSaveStatus(Hawkins.combineSaveResults(results));
+      });
     }
 
-    // ---- Start ----------------------------------------------------------------------------------
+    // The last trial: it records the outcome, so the extension's final save (which starts when the
+    // timeline ends) includes it, and puts up the terminal screen.
+    const terminalScreen = {
+      type: jsPsychCallFunction,
+      func: () => {
+        const { exit, codeKey } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
+        recordOutcome(exit);
+        // Leave the group, so a partner still waiting sees this participant as gone. There is no
+        // session to leave when connect() failed.
+        if (jsPsych.multiplayer.status) jsPsych.multiplayer.disconnect();
+        showTerminalScreen(exit, codeKey);
+        return exit;
+      },
+    };
+
+    // ---- Connecting -----------------------------------------------------------------------------
 
     function adapter() {
       return onJatos
@@ -888,6 +1055,70 @@
           // is detected as a restart instead of the tab joining as a third participant.
           new jsPsychAdapterMultiplayerLocal();
     }
+
+    // Set once this tab has joined a session. A reload then skips the instructions and quiz it has
+    // already passed, so a participant who reloads mid-game reaches the reload exit straight away.
+    const CONNECTED_KEY = "hawkins-connected";
+    let resumed = false;
+    try {
+      resumed = sessionStorage.getItem(CONNECTED_KEY) === "1";
+    } catch {
+      // Storage unavailable: a reload replays the instructions before reaching the reload exit.
+    }
+
+    async function connectSession() {
+      try {
+        await jsPsych.multiplayer.connect(adapter(), {
+          dropoutTimeout: CONFIG.DROPOUT_TIMEOUT_MS,
+          reconnectTimeout: CONFIG.RECONNECT_GIVE_UP_MS,
+        });
+      } catch (error) {
+        console.error("Could not connect to the multiplayer session", error);
+        noMatchReason = "connect_error";
+        return { connection: noMatchReason };
+      }
+      try {
+        sessionStorage.setItem(CONNECTED_KEY, "1");
+      } catch {
+        // See `resumed` above.
+      }
+
+      participantId = jsPsych.multiplayer.participantId;
+      dyadId = jsPsych.multiplayer.sessionId;
+
+      if (jsPsych.multiplayer.restarted) {
+        reloaded = true;
+        return { connection: "restarted" };
+      }
+
+      SCHEDULE = Hawkins.sequentialSchedule(
+        CONFIG.BLOCKS,
+        SHAPES.map((s) => s.id),
+        (key, array) => jsPsych.multiplayer.shuffle(key, array),
+        CONFIG.TARGETS_PER_BLOCK,
+      );
+      // jsPsych reads a timeline's timeline_variables when that timeline starts, so setting it here,
+      // before the game loop is reached, takes effect.
+      gameLoop.timeline_variables = SCHEDULE;
+      jsPsych.data.addProperties({
+        config_trials: SCHEDULE.length,
+        assigned_target_ids: SCHEDULE.slice(0, CONFIG.TARGETS_PER_BLOCK).map((trial) => trial.targets[0]).sort(),
+      });
+      return { connection: "connected" };
+    }
+
+    // Connects only after the instructions and quiz, so the lobby pairs participants who are ready
+    // to play and nobody's pairing timeout runs while their partner is still reading.
+    const connectTrial = {
+      type: jsPsychCallFunction,
+      async: true,
+      func: (done) => {
+        jsPsych.getDisplayElement().innerHTML = "<p>Connecting…</p>";
+        connectSession().then(done);
+      },
+    };
+
+    // ---- Start ----------------------------------------------------------------------------------
 
     async function start() {
       const params = studyLinkParams();
@@ -902,42 +1133,10 @@
         session_id: prolific.session,
       });
 
-      try {
-        await jsPsych.multiplayer.connect(adapter(), {
-          dropoutTimeout: CONFIG.DROPOUT_TIMEOUT_MS,
-          reconnectTimeout: CONFIG.RECONNECT_GIVE_UP_MS,
-        });
-      } catch (error) {
-        console.error("Could not connect to the multiplayer session", error);
-        noMatchReason = "connect_error";
-        await jsPsych.run([terminalScreen]);
-        return;
-      }
-
-      participantId = jsPsych.multiplayer.participantId;
-      dyadId = jsPsych.multiplayer.sessionId;
-
-      if (jsPsych.multiplayer.restarted) {
-        reloaded = true;
-        await jsPsych.run([terminalScreen]);
-        return;
-      }
-
-      SCHEDULE = Hawkins.sequentialSchedule(
-        CONFIG.BLOCKS,
-        SHAPES.map((s) => s.id),
-        (key, array) => jsPsych.multiplayer.shuffle(key, array),
-        CONFIG.TARGETS_PER_BLOCK,
-      );
-      gameLoop.timeline_variables = SCHEDULE;
-      jsPsych.data.addProperties({
-        config_trials: SCHEDULE.length,
-        assigned_target_ids: SCHEDULE.slice(0, CONFIG.TARGETS_PER_BLOCK).map((trial) => trial.targets[0]).sort(),
-      });
-
       await jsPsych.run([
         preloadTrial,
-        generalInstructions,
+        ...(resumed ? [] : [generalInstructions, comprehensionLoop]),
+        connectTrial,
         waitingRoom,
         pairingPhase,
         roleRecap,

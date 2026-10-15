@@ -42,7 +42,10 @@ function readZip(buf) {
 
 test("the archive's end record counts every entry", { skip: !hasVendor && "run scripts/vendor.mjs" }, () => {
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "jzip-")), "study.jzip");
-  execFileSync("node", ["scripts/make-jzip.mjs"], { cwd: REPO, env: { ...process.env, JZIP_OUT: out } });
+  // The checked-in codes may still be placeholders; the guard has its own tests below.
+  execFileSync("node", ["scripts/make-jzip.mjs", "--allow-placeholder-codes"], {
+    cwd: REPO, env: { ...process.env, JZIP_OUT: out }, stdio: "pipe",
+  });
   const { onDisk, total, entries } = readZip(fs.readFileSync(out));
   assert.equal(onDisk, total);
   assert.equal(entries.size, total);
@@ -61,4 +64,55 @@ test("the archive's end record counts every entry", { skip: !hasVendor && "run s
     assert.ok(entries.has(`${dir}/${ref}`), `the page loads ${ref}, which the archive lacks`);
   }
   for (const img of ["A", "L"]) assert.ok(entries.has(`${dir}/assets/tangrams/tangram_${img}.png`));
+});
+
+// A copy of the study inputs, with the page's completion codes replaced by `codes`.
+function studyCopy(codes) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jzip-codes-"));
+  const scripts = fs.readdirSync(REPO).filter((f) => f.endsWith(".js"));
+  for (const p of ["scripts", "assets", "vendor", ...scripts]) {
+    fs.cpSync(path.join(REPO, p), path.join(dir, p), { recursive: true });
+  }
+  const page = fs.readFileSync(path.join(REPO, "reference-game-hawkins.html"), "utf8");
+  const block = Object.entries(codes).map(([k, v]) => `        ${k}: "${v}", // note`).join("\n");
+  const edited = page.replace(/COMPLETION_CODES:\s*\{[^}]*\}/, `COMPLETION_CODES: {\n${block}\n      }`);
+  assert.notEqual(edited, page);
+  fs.writeFileSync(path.join(dir, "reference-game-hawkins.html"), edited);
+  return dir;
+}
+
+function build(dir, ...args) {
+  const out = path.join(dir, "study.jzip");
+  try {
+    execFileSync("node", ["scripts/make-jzip.mjs", ...args], {
+      cwd: dir, env: { ...process.env, JZIP_OUT: out }, stdio: "pipe", encoding: "utf8",
+    });
+    const entries = readZip(fs.readFileSync(out)).entries;
+    const jas = [...entries].find(([name]) => name.endsWith(".jas"))[1];
+    return { ok: true, jas: JSON.parse(jas.toString("utf8")) };
+  } catch (err) {
+    return { ok: false, stderr: String(err.stderr) };
+  }
+}
+
+const REAL_CODES = { complete: "C1A2B3", partner_dropped: "D4E5F6", no_match: "G7H8", reloaded: "J9K0" };
+
+test("the archive build refuses empty or placeholder completion codes", { skip: !hasVendor && "run scripts/vendor.mjs" }, () => {
+  for (const bad of ["insertcodehere", "", " InsertCodeHere "]) {
+    const result = build(studyCopy({ ...REAL_CODES, no_match: bad }));
+    assert.equal(result.ok, false, `built with no_match "${bad}"`);
+    assert.match(result.stderr, /refusing to build/);
+    assert.match(result.stderr, /no_match/);
+    assert.doesNotMatch(result.stderr, /complete \(/, "names only the codes at fault");
+  }
+});
+
+test("the archive builds with real codes, or with placeholders only when allowed", { skip: !hasVendor && "run scripts/vendor.mjs" }, () => {
+  const real = build(studyCopy(REAL_CODES));
+  assert.equal(real.ok, true, real.stderr);
+  assert.doesNotMatch(real.jas.data.comments, /TEST BUILD/);
+
+  const testBuild = build(studyCopy({ ...REAL_CODES, complete: "insertcodehere" }), "--allow-placeholder-codes");
+  assert.equal(testBuild.ok, true, testBuild.stderr);
+  assert.match(testBuild.jas.data.comments, /TEST BUILD.*complete/);
 });
