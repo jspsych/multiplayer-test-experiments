@@ -78,12 +78,20 @@ Drive-backed DataPipe experiment `wE2Zlitn0uhu`. This folder was created primari
 it may also be used for the main study, pending review. Collaborators are welcome to create their
 own [DataPipe experiment](https://pipe.jspsych.org/getting-started) with Google Drive as its storage
 provider and replace this one configuration value with their dashboard's 12-character experiment ID.
-Local runs also send data to the configured study; set the ID to an empty string to disable
-DataPipe for offline testing. Turn on **Accept new data** in the DataPipe dashboard and verify a completed test run in
-the linked Drive folder before a paid run. The extension stages each completed trial and submits one
-JSON file when the jsPsych timeline ends; an abandoned run can yield a `.partial.json` file. The
-filename is random and carries no participant identifier. Prolific, participant, and dyad IDs remain
-in the saved rows. JATOS result data is saved separately.
+DataPipe is on only when JATOS serves the page. A local run uploads nothing unless its URL opts in
+with `?datapipe=1` (e.g. `reference-game-hawkins.html?mp_session=…&datapipe=1`); use that only for a
+deliberate test upload, since it writes into the study's Drive folder. Set the ID to an empty string
+to disable DataPipe everywhere. Turn on **Accept new data** in the DataPipe dashboard and verify a
+completed test run in the linked Drive folder before a paid run. The extension stages each completed
+trial and submits one JSON file when the jsPsych timeline ends; an abandoned run can yield a
+`.partial.json` file. A participant who reloads mid-session produces two files: a partial one from
+the page they left and a short final one from the reloaded page, which records the `reloaded` exit.
+The filename is random and carries no participant identifier. Prolific, participant, and dyad IDs
+remain in the saved rows. JATOS result data is saved separately.
+
+The terminal screen never waits for the upload. It shows the exit message and the Prolific controls
+at once; its status line reports the save, or after 3 seconds (`SAVE_STATUS_BUDGET_MS`) says the
+upload is still running and the participant can submit.
 
 Streaming means data leaves the browser during the session, and closing the tab may leave a partial
 file. Confirm that this matches the study consent and retention plan. DataPipe's staged-trial limit is
@@ -101,7 +109,8 @@ way the Hawkins build was.
 gained session IDs, group formation and rejoin detection, so parts of it are out of date. The Hawkins
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
 randomness, dropout and idle detection with paid exits, reload detection, Prolific IDs and
-completion routing, and saving to JATOS and/or DataPipe. Still open:
-completion codes are unset in `CONFIG`, a Google Drive test upload and the real JATOS run are outstanding,
-and the multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit and a
-jsPsych preview build).
+completion routing, and saving to JATOS and DataPipe. Still open: completion codes are unset in
+`CONFIG`; the build has not run on a real JATOS server, so no JATOS-hosted run has yet been checked
+end to end in the DataPipe Drive folder (a local `?datapipe=1` run can check the upload path
+sooner); and the multiplayer packages are unreleased (the build pins a jspsych-multiplayer commit
+and a jsPsych preview build).

@@ -184,30 +184,42 @@
       // Google Drive-backed DataPipe study created primarily for testing. It may also be used
       // for the main study; collaborators can create their own study and replace this ID.
       // Empty disables DataPipe; JATOS result data is still saved independently.
+      // DataPipe runs only when the page is served by JATOS. A local run uploads nothing unless its
+      // URL opts in with `?datapipe=1`, so dev and test runs stay out of the study's Drive folder.
       DATAPIPE_EXPERIMENT_ID: "wE2Zlitn0uhu",
       JATOS_SAVE_PER_ROUND: true,
+      // How long the terminal screen says "Saving…" before telling the participant they can submit
+      // while the upload finishes in the background. The exit message and submit controls appear
+      // at once either way; this bounds only the status line.
+      SAVE_STATUS_BUDGET_MS: 3000,
     };
 
     const onJatos = typeof jatos !== "undefined" && typeof jatos.onLoad === "function";
+    const datapipeEnabled =
+      Boolean(CONFIG.DATAPIPE_EXPERIMENT_ID) &&
+      (onJatos || new URLSearchParams(location.search).get("datapipe") === "1");
 
-    // An opaque filename avoids putting Prolific, participant, or dyad identifiers in DataPipe's
-    // staging metadata. Those identifiers remain in the saved trial rows.
-    const datapipeFilename = `${crypto.randomUUID()}.json`;
-    let pipeSaveResult = { skipped: true };
+    // Settles with the extension's final-save result. The extension makes that save after the
+    // timeline ends and sets no timeout on it, so the terminal screen never waits for it (see
+    // showTerminalScreen).
+    let resolvePipeSave = null;
+    const pipeSaved = datapipeEnabled
+      ? new Promise((resolve) => { resolvePipeSave = resolve; })
+      : Promise.resolve({ skipped: true });
     const jsPsych = initJsPsych({
       extensions: [{
         type: jsPsychExtensionPipe,
         params: {
           experiment_id: CONFIG.DATAPIPE_EXPERIMENT_ID,
-          filename: datapipeFilename,
+          // An opaque filename keeps Prolific, participant, and dyad IDs out of DataPipe's staging
+          // metadata; they remain in the saved trial rows. The extension resolves it once, at the
+          // start. randomID, unlike the Web Crypto UUID API, also works outside a secure context.
+          filename: () => `${jsPsych.randomization.randomID(32)}.json`,
           format: "json",
-          enabled: Boolean(CONFIG.DATAPIPE_EXPERIMENT_ID),
-          on_save: (result) => { pipeSaveResult = result; },
+          enabled: datapipeEnabled,
+          on_save: (result) => resolvePipeSave?.(result),
         },
       }],
-      // The extension uploads before invoking this callback. Keep the final Prolific controls here
-      // so a navigation cannot interrupt the full-data upload.
-      on_finish: showTerminalScreen,
     });
 
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
@@ -250,6 +262,7 @@
         .map(([k]) => k);
       if (unset.length) console.warn(`Unset Prolific completion code(s): ${unset.join(", ")}`);
       if (!CONFIG.DATAPIPE_EXPERIMENT_ID) console.warn("DataPipe experiment ID is unset.");
+      else if (!datapipeEnabled) console.info("DataPipe is off for this local run; add ?datapipe=1 to test it.");
     })();
 
     // ---- Session state --------------------------------------------------------------------------
@@ -812,38 +825,63 @@
       const el = document.getElementById("save-status");
       if (!el) return;
       el.textContent = result.skipped
-        ? "DataPipe is not configured; this run is a local or JATOS test."
+        ? "Nothing was uploaded: DataPipe is off for local runs (add ?datapipe=1 to test it)."
         : result.ok
         ? "Your responses have been saved."
-        : "The final upload was not accepted. Your completed trials may be recoverable; please submit anyway and message the researcher.";
+        : result.timedOut
+        ? "Still uploading. You can submit now; the upload will finish in the background."
+        : "The final upload was not accepted. Please submit anyway and message the researcher.";
     }
 
-    const terminalScreen = {
-      type: jsPsychCallFunction,
-      func: () => {
-        const { exit } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
-        recordOutcome(exit);
-        if (jsPsych.multiplayer.status) jsPsych.multiplayer.disconnect();
-        return exit;
-      },
-    };
-
-    async function showTerminalScreen() {
-      const { exit, codeKey } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
-      const jatosResult = JatosSink ? await JatosSink.submit() : { skipped: true };
-      jsPsych.getDisplayElement().innerHTML = `${exitMessage(exit)}
-        <p id="save-status" style="font-size:0.9em;color:#666"></p>
+    // The terminal screen shows the exit message and the submit controls at once, and never waits
+    // on a save. It renders beside jsPsych's display element, which it hides: once the timeline
+    // ends, the Pipe extension writes its "Saving data" message into that element and then awaits
+    // Firebase and pipe.jspsych.org with no timeout, which on a lost connection can be forever.
+    // The status line follows the saves and gives up waiting after SAVE_STATUS_BUDGET_MS.
+    function showTerminalScreen(exit, codeKey) {
+      const display = jsPsych.getDisplayElement();
+      const screen = document.createElement("div");
+      screen.id = "terminal-screen";
+      screen.className = "jspsych-content";
+      screen.innerHTML = `${exitMessage(exit)}
+        <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
         ${submissionBlockHTML(codeKey)}
         ${onJatos ? "" : `<p style="font-size:0.85em;color:#666">Researcher tools:
           <button id="dl" type="button">Download data (JSON)</button></p>`}`;
-      showSaveStatus(Hawkins.combineSaveResults([pipeSaveResult, jatosResult]));
+      display.style.display = "none";
+      display.after(screen);
       document.getElementById("prolific-submit")?.addEventListener("click", () =>
         submitToProlific(codeKey, exit === "complete"),
       );
       document.getElementById("dl")?.addEventListener("click", () =>
         jsPsych.data.get().localSave("json", "reference-game-hawkins-data.json"),
       );
+
+      let settled = false;
+      const budget = setTimeout(() => {
+        if (!settled) showSaveStatus({ ok: false, timedOut: true });
+      }, CONFIG.SAVE_STATUS_BUDGET_MS);
+      Promise.all([JatosSink ? JatosSink.submit() : { skipped: true }, pipeSaved]).then((results) => {
+        settled = true;
+        clearTimeout(budget);
+        showSaveStatus(Hawkins.combineSaveResults(results));
+      });
     }
+
+    // The last trial: it records the outcome, so the extension's final save (which starts when the
+    // timeline ends) includes it, and puts up the terminal screen.
+    const terminalScreen = {
+      type: jsPsychCallFunction,
+      func: () => {
+        const { exit, codeKey } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
+        recordOutcome(exit);
+        // Leave the group, so a partner still waiting sees this participant as gone. There is no
+        // session to leave when connect() failed.
+        if (jsPsych.multiplayer.status) jsPsych.multiplayer.disconnect();
+        showTerminalScreen(exit, codeKey);
+        return exit;
+      },
+    };
 
     // ---- Connecting -----------------------------------------------------------------------------
 
