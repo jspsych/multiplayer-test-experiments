@@ -103,6 +103,36 @@
     return { exit, codeKey };
   }
 
+  // ---- Round phase ----------------------------------------------------------------------------
+
+  // True once a round's shared data (`jsPsych.multiplayer.getAll({ scope: "trial" })` during a
+  // multiplayer-reference-game trial) holds the matcher's submitted assignment. That submission is
+  // the plugin's own feedback trigger: each client enters feedback on the update that delivers it
+  // (plugin-multiplayer-reference-game `enterFeedback`, reached through `readSubmission`), whether
+  // the matcher clicked or `selection_timeout` submitted for them. Only the matcher ever writes it,
+  // so any slot holding one means feedback has begun.
+  function roundHasSubmission(group) {
+    const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+    return Object.values(isObject(group) ? group : {}).some(
+      (slot) => isObject(slot?.submission) && isObject(slot.submission.assignment),
+    );
+  }
+
+  // ---- Completion codes -----------------------------------------------------------------------
+
+  // Stand-ins for the real Prolific codes during setup. The page labels them as test codes, and
+  // scripts/make-jzip.mjs refuses to build the JATOS archive while any code is empty or one of these.
+  const PLACEHOLDER_CODES = ["insertcodehere"];
+
+  function isPlaceholderCode(code) {
+    return typeof code === "string" && PLACEHOLDER_CODES.includes(code.trim().toLowerCase());
+  }
+
+  // A code that can be paid: set, and not a placeholder.
+  function isRealCode(code) {
+    return typeof code === "string" && code.trim() !== "" && !isPlaceholderCode(code);
+  }
+
   // ---- JATOS ----------------------------------------------------------------------------------
 
   // Stores the whole jsPsych data set as the JATOS result data. Each call replaces the previous one,
@@ -141,5 +171,9 @@
     EXIT_CODES,
     createJatosSink,
     combineSaveResults,
+    roundHasSubmission,
+    PLACEHOLDER_CODES,
+    isPlaceholderCode,
+    isRealCode,
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);
