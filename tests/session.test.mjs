@@ -120,6 +120,7 @@ test("every session state lands on exactly one exit", () => {
     [{ reloaded: false, noMatchReason: "lobby_timeout", interruption: null }, "no_match", "no_match"],
     [{ reloaded: false, noMatchReason: "connect_error", interruption: null }, "no_match", "no_match"],
     [{ reloaded: false, noMatchReason: "partner_left_before_start", interruption: null }, "no_match", "no_match"],
+    [{ reloaded: false, noMatchReason: "partner_not_ready", interruption: null }, "no_match", "no_match"],
     [{ reloaded: false, noMatchReason: null, interruption: "partner_left" }, "partner_left", "partner_dropped"],
     [{ reloaded: false, noMatchReason: null, interruption: "inactive_partner" }, "inactive_partner", "partner_dropped"],
     [{ reloaded: false, noMatchReason: null, interruption: "connection_lost" }, "connection_lost", "partner_dropped"],
