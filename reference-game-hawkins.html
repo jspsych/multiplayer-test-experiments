@@ -176,9 +176,8 @@
       // while any code is empty or a placeholder (unless run with --allow-placeholder-codes).
       COMPLETION_CODES: {
         complete: "insertcodehere",
-        partner_dropped: "insertcodehere", // partner left or went idle, or connection was lost
+        partner_dropped: "insertcodehere", // partner left, or this participant's connection was lost
         no_match: "insertcodehere", // never got a partner
-        inactive: "insertcodehere", // unused: timeouts no longer end the game
         reloaded: "insertcodehere", // this participant reloaded the page mid-session
       },
       PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
@@ -736,15 +735,23 @@
     // whether or not it renders any feedback text, so read that rather than the feedback DOM. Outside
     // a trial, or once the session has closed, the read throws and this is false.
     function inFeedbackPhase() {
+      return roundSubmissionNow() !== null;
+    }
+
+    // The matcher's submitted choice for the current round (`timed_out: true` when the
+    // selection_timeout made it), or null before feedback and outside a trial.
+    function roundSubmissionNow() {
       try {
-        return Hawkins.roundHasSubmission(jsPsych.multiplayer.getAll({ scope: "trial" }));
+        return Hawkins.roundSubmission(jsPsych.multiplayer.getAll({ scope: "trial" }));
       } catch {
-        return false;
+        return null;
       }
     }
 
     let roundCountdownInterval = null;
-    let roundFeedbackShown = false;
+    // Shares, and on the director receives, how many director messages had reached the matcher by
+    // the deadline (Hawkins.createDeadlineWitness). Replaced every round in on_load.
+    let deadlineWitness = null;
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -798,38 +805,55 @@
       },
       on_load: () => {
         // The plugin starts its wall-clock timers during synchronous trial setup, just before
-        // jsPsych calls on_load. Stop this display when feedback begins or the trial ends.
-        // The plugin disables the chat input exactly when feedback starts (chat is otherwise
-        // always open here), and a timed-out round reaches feedback with no cell marked as picked.
-        const P = ".jspsych-multiplayer-reference-game";
+        // jsPsych calls on_load. Stop this display when feedback begins (inFeedbackPhase) or the
+        // trial ends. A submission the selection_timeout made carries `timed_out: true`.
         const remaining = document.getElementById("round-remaining");
         const note = document.getElementById("round-note");
-        const chatInput = document.querySelector(`${P}-chat-input`);
         const deadline = Date.now() + CONFIG.ROUND_TIMEOUT_MS;
-        roundFeedbackShown = false;
+        const witness = Hawkins.createDeadlineWitness(myRole, participantId, partnerId);
+        deadlineWitness = witness;
+        try {
+          // Ends with the trial. On the matcher, the callback runs in the same update that delivers
+          // its submission and starts its feedback, so the count is what the matcher had received.
+          jsPsych.multiplayer.subscribe((group) => {
+            const count = witness.observe(group);
+            if (count === null) return;
+            Promise.resolve()
+              .then(() => jsPsych.multiplayer.update({ [Hawkins.DEADLINE_COUNT_KEY]: count }, { scope: "trial" }))
+              .catch(() => {}); // a closed session ends the round anyway
+          }, { scope: "trial" });
+        } catch (error) {
+          console.error("Could not watch the round's shared data", error);
+        }
+        const showTimeoutNote = () => {
+          // Who didn't act: the matcher's shared count once known, else this side's own view.
+          let described = witness.count;
+          if (described === null) {
+            const own = document.querySelectorAll(".jspsych-multiplayer-reference-game-chat-message.is-self").length;
+            const all = document.querySelectorAll(".jspsych-multiplayer-reference-game-chat-message").length;
+            described = myRole === "director" ? own : all - own;
+          }
+          const cause = described > 0
+            ? "The Matcher didn't pick a shape this round."
+            : "The Director didn't send a description this round.";
+          note.textContent =
+            myRole === "matcher"
+              ? `Time's up! ${cause} The correct shape is outlined in green.`
+              : `Time's up! ${cause}`;
+          note.classList.add("is-timeout");
+          return witness.count !== null;
+        };
         const update = () => {
-          if (chatInput?.disabled) {
-            roundFeedbackShown = true;
-            const picked = document.querySelector(`${P}-cell.is-correct, ${P}-cell.is-wrong`);
-            if (picked) {
-              remaining.textContent = "Selection complete";
-            } else {
-              remaining.textContent = "Time's up";
-              const own = document.querySelectorAll(`${P}-chat-message.is-self`).length;
-              const all = document.querySelectorAll(`${P}-chat-message`).length;
-              const described = (myRole === "director" ? own : all - own) > 0;
-              const cause = described
-                ? "The Matcher didn't pick a shape this round."
-                : "The Director didn't send a description this round.";
-              note.textContent =
-                myRole === "matcher"
-                  ? `Time's up! ${cause} The correct shape is outlined in green.`
-                  : `Time's up! ${cause}`;
-              note.classList.add("is-timeout");
-            }
+          const submission = roundSubmissionNow();
+          if (!submission) {
+            remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
+          } else if (!submission.timed_out) {
+            remaining.textContent = "Selection complete";
             clearInterval(countdownInterval);
           } else {
-            remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
+            remaining.textContent = "Time's up";
+            // Keep refreshing the note until the matcher's count arrives (at once on the matcher).
+            if (showTimeoutNote()) clearInterval(countdownInterval);
           }
         };
         const countdownInterval = window.setInterval(update, 200);
@@ -839,15 +863,12 @@
       on_finish: (data) => {
         clearInterval(roundCountdownInterval);
         roundCountdownInterval = null;
-        Object.assign(data, Hawkins.classifyRound(data), {
-          feedback_shown: roundFeedbackShown,
-          timeout_source:
-            data.multiplayer_outcome !== "timeout"
-              ? null
-              : roundFeedbackShown
-              ? "selection_timeout"
-              : "round_timeout",
-        });
+        // feedback_shown and timeout_source come from the plugin's data (see classifyRound), not
+        // from the display poll above, which a throttled background tab can miss.
+        Object.assign(data, Hawkins.classifyRound(data, {
+          directorMessagesByDeadline: deadlineWitness?.count ?? null,
+        }));
+        deadlineWitness = null;
         if (CONFIG.JATOS_SAVE_PER_ROUND) saveProgress();
 
         // Timeouts never end the game; only a disconnection does.
@@ -893,24 +914,14 @@
             <p><strong>You will still be paid ${money(CONFIG.NO_MATCH_PAYMENT_USD)} for your
                time.</strong></p>`;
         case "partner_left":
-        case "inactive_partner":
           return `<h2>Your partner stopped responding</h2>
-            <p>${
-              exit === "partner_left"
-                ? "Your partner disconnected"
-                : "Your partner stopped taking part"
-            }, so we have ended the study here.
+            <p>Your partner disconnected, so we have ended the study here.
                <strong>This is not your fault, and your payment is not affected.</strong></p>
             ${progress}`;
         case "connection_lost":
           return `<h2>We lost the connection to the game</h2>
             <p>Your connection to the game server dropped and did not come back, so we have ended
                the study here. <strong>Your payment is not affected.</strong></p>
-            ${progress}`;
-        // Unreachable while timeouts never end the game; kept so every routed exit has a message.
-        case "inactive_self":
-          return `<h2>The game has ended</h2>
-            <p>The game ended because you stopped taking part.</p>
             ${progress}`;
         case "complete": {
           const correct = completedRounds().filter({ correct: true }).count();

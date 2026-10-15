@@ -11,8 +11,8 @@ live, version, and be piloted independently.
   (2020), *Cognitive Science* 44, e12845. Sequential condition: single target per trial, one click.
   Currently the paid-pilot build: 18 trials, with Prolific exits, dropout
   handling and data saving. Runs on the local adapter or as a JATOS group study.
-- [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, idle detection, exit
-  routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
+- [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, round classification,
+  exit routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
 - [`scripts/vendor.mjs`](scripts/vendor.mjs) — fills the gitignored `vendor/` with every script the
   Hawkins page loads, at pinned versions. [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
   the page as a JATOS study archive.
@@ -42,8 +42,11 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 > it ends are logged as a timeout (`multiplayer_outcome: "timeout"` in the Hawkins build, `ended_by: "timeout"` in C&WG) with a null assignment, so they're easy to exclude.
 > In the Hawkins build the limit is the matcher's `selection_timeout`: both players see a "Time's up"
 > result and the game moves on. A timed-out row has `round_result: "timeout"`, `correct: null`, and an
-> `idle_role` (`"director"` if no director message arrived, otherwise `"matcher"`). Timeouts never end
-> the game; only a disconnection does.
+> `idle_role`: `"director"` if no director message had reached the matcher by the deadline, otherwise
+> `"matcher"`. The matcher counts those messages when its choice is submitted and shares the count, so
+> both rows carry the same `director_messages_by_deadline` and `idle_role`. `feedback_shown` and
+> `timeout_source` (`"selection_timeout"`, or `"round_timeout"` for the 65s backstop) come from the
+> plugin's data. Timeouts never end the game; only a disconnection does.
 
 ## Current pilot direction
 
