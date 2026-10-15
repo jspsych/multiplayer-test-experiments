@@ -90,11 +90,10 @@ function setup({ pipe = new Promise(() => {}), jatos = null, exit = "connection_
     clearTimeout: (handle) => { if (timers[handle - 1]) timers[handle - 1].fn = null; },
     CONFIG: {
       BLOCKS: 3,
-      IDLE_ROUNDS: 2,
       NO_MATCH_PAYMENT_USD: 1.25,
       SAVE_STATUS_BUDGET_MS: 3000,
       PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
-      COMPLETION_CODES: { complete: "C1", partner_dropped: "C2", no_match: "C3", inactive: "C4", reloaded: "C5" },
+      COMPLETION_CODES: { complete: "C1", partner_dropped: "C2", no_match: "C3", reloaded: "C5" },
     },
     SHAPES: Array.from({ length: 12 }, (_, i) => ({ id: String(i) })),
     SCHEDULE: Array.from({ length: 36 }),
@@ -106,6 +105,7 @@ function setup({ pipe = new Promise(() => {}), jatos = null, exit = "connection_
       data: {
         get: () => ({
           filter: () => ({ count: () => 4, filter: () => ({ count: () => 3 }) }),
+          filterCustom: () => ({ count: () => 4 }),
           json: () => JSON.stringify(rows),
           localSave: () => {},
         }),

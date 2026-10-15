@@ -11,8 +11,8 @@ live, version, and be piloted independently.
   (2020), *Cognitive Science* 44, e12845. Sequential condition: single target per trial, one click.
   Currently the paid-pilot build: 18 trials, with Prolific exits, dropout
   handling and data saving. Runs on the local adapter or as a JATOS group study.
-- [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, idle detection, exit
-  routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
+- [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, round classification,
+  exit routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
 - [`scripts/vendor.mjs`](scripts/vendor.mjs) — fills the gitignored `vendor/` with every script the
   Hawkins page loads, at pinned versions. [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
   the page as a JATOS study archive.
@@ -40,6 +40,13 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 > **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) purely so
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
 > it ends are logged as a timeout (`multiplayer_outcome: "timeout"` in the Hawkins build, `ended_by: "timeout"` in C&WG) with a null assignment, so they're easy to exclude.
+> In the Hawkins build the limit is the matcher's `selection_timeout`: both players see a "Time's up"
+> result and the game moves on. A timed-out row has `round_result: "timeout"`, `correct: null`, and an
+> `idle_role`: `"director"` if no director message had reached the matcher by the deadline, otherwise
+> `"matcher"`. The matcher counts those messages when its choice is submitted and shares the count, so
+> both rows carry the same `director_messages_by_deadline` and `idle_role`. `feedback_shown` and
+> `timeout_source` (`"selection_timeout"`, or `"round_timeout"` for the 65s backstop) come from the
+> plugin's data. Timeouts never end the game; only a disconnection does.
 
 ## Current pilot direction
 
@@ -114,8 +121,8 @@ way the Hawkins build was.
 **Not yet.** [`READINESS.md`](READINESS.md) is the full audit, written before jspsych-multiplayer
 gained session IDs, group formation and rejoin detection, so parts of it are out of date. The Hawkins
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
-randomness, dropout and idle detection with paid exits, reload detection, Prolific IDs and
-completion routing, and saving to JATOS and DataPipe. Still open: real completion codes are unset in
+randomness, dropout detection with paid exits, per-round timeout classification (timeouts never end
+the game), reload detection, Prolific IDs and completion routing, and saving to JATOS and DataPipe. Still open: real completion codes are unset in
 `CONFIG` (placeholders stand in); the build has not run on a real JATOS server, so no JATOS-hosted
 run has yet been checked end to end in the DataPipe Drive folder (a local `?datapipe=1` run can
 check the upload path sooner); and the multiplayer packages are unreleased (the build pins a

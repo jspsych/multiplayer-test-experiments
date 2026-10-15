@@ -28,7 +28,10 @@ test("a round is in feedback once any slot holds a submitted assignment", () => 
 test("the page reads the current trial's shared data, and is false outside a trial", () => {
   const page = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
   const start = page.indexOf("    function inFeedbackPhase");
-  const source = page.slice(start, page.indexOf("\n    }\n", start) + 6);
+  // inFeedbackPhase, and roundSubmissionNow when the page has it.
+  const helper = page.indexOf("    function roundSubmissionNow");
+  const end = helper > start ? helper : start;
+  const source = page.slice(start, page.indexOf("\n    }\n", end) + 6);
   let read = () => ({});
   const scopes = [];
   const context = vm.createContext({
