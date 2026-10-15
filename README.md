@@ -13,6 +13,10 @@ live, version, and be piloted independently.
   handling and data saving. Runs on the local adapter or as a JATOS group study.
 - [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, round classification,
   exit routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
+- [`hawkins-ui.js`](hawkins-ui.js) — the Hawkins round display: separate trial, number-correct and
+  time-remaining panels, a warning in each round's last 10 seconds, a "Correct!", "Incorrect." or
+  "Time's up!" result line, and labels for the chat. Presentation only; see
+  [`GAMEPLAY-CLARITY.md`](GAMEPLAY-CLARITY.md).
 - [`presence-check.js`](presence-check.js) — a jsPsych extension on each Hawkins round: after 30s
   with no mouse, keyboard, wheel or touch input from the participant (script-dispatched events and
   the chat log's own scrolling don't count) it asks "Are you still with us?" and waits 15s for a
