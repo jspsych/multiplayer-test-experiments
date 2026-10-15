@@ -22,6 +22,7 @@
     <script src="tangrams.js"></script>
     <script src="hawkins.js"></script>
     <script src="presence-check.js"></script>
+    <script src="hawkins-ui.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
       /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
@@ -92,14 +93,121 @@
         background: #1971c2;
       }
 
-      /* "Time's up" note in the round header, shown during a timed-out round's feedback. */
+      /* ROUND HEADER (hawkins-ui.js): trial progress, number correct and time remaining in separate
+         panels. The timer panel turns amber with a warning in the round's last
+         CONFIG.TIMER_WARNING_SECONDS. */
+      .hk-status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 12px 0;
+        text-align: left;
+      }
+      .hk-stat {
+        flex: 1;
+        min-width: 140px;
+        padding: 10px 16px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        background: #f8fafc;
+      }
+      .hk-stat span,
+      .hk-stat small {
+        display: block;
+        font-size: 15px;
+      }
+      .hk-stat strong {
+        display: block;
+        font-size: 26px;
+        line-height: 1.35;
+      }
+      .hk-timer {
+        background: #eaf2ff;
+        border: 2px solid #315c9e;
+      }
+      .hk-timer.is-urgent {
+        background: #fff3df;
+        border-color: #9c5400;
+      }
+      #hk-time-hint {
+        min-height: 1.3em;
+        font-weight: bold;
+      }
+
+      /* The round's result under the panels during feedback: "Correct!", "Incorrect." or
+         "Time's up! …". A timeout is amber, not the red of an incorrect choice. */
       .hk-round-note {
-        min-height: 1.2em;
+        min-height: 1.35em;
         margin: 0.2em 0;
-        font-weight: 600;
+        font-size: 24px;
+        font-weight: bold;
+      }
+      .hk-round-note.is-correct {
+        color: #2b8a3e;
+      }
+      .hk-round-note.is-wrong {
+        color: #c92a2a;
       }
       .hk-round-note.is-timeout {
-        color: #c92a2a;
+        color: #9c5400;
+      }
+
+      /* CHAT LABELS (hawkins-ui.js): a heading over the conversation, with a hint while it is empty,
+         and a label and help over the input. The plugin's own "You are the …" line is hidden because
+         the prompt already names the role. */
+      .hk-chat-label {
+        display: block;
+        margin-top: 16px;
+        font-size: 20px;
+        font-weight: bold;
+        text-align: left;
+      }
+      .hk-chat-help {
+        margin: 4px 0 8px;
+        font-size: 16px;
+        text-align: left;
+      }
+      .hk-conversation {
+        position: relative;
+      }
+      .hk-conversation-empty {
+        display: none;
+        position: absolute;
+        top: 12px;
+        left: 14px;
+        right: 14px;
+        margin: 0;
+        color: #58606b;
+        font-size: 16px;
+        text-align: left;
+        pointer-events: none;
+      }
+      .hk-conversation .jspsych-multiplayer-reference-game-chat-log:empty + .hk-conversation-empty {
+        display: block;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-log {
+        min-height: 60px;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-input {
+        padding: 12px;
+        border: 2px solid #315c9e;
+        border-radius: 6px;
+        background: #fff;
+        font-size: 18px;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-input:focus {
+        outline: 3px solid #90b5ec;
+        outline-offset: 2px;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-send {
+        padding: 12px 20px;
+        border-radius: 6px;
+        background: #234f90;
+        color: #fff;
+        font-weight: bold;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-role {
+        display: none;
       }
 
       /* "Are you still with us?" reminder (presence-check.js). The backdrop takes clicks so the
@@ -223,6 +331,8 @@
       READY_TIMEOUT_MS: 2 * 60000,
       // Round limit, as the matcher's `selection_timeout`: on expiry both players see feedback.
       ROUND_TIMEOUT_MS: 60000,
+      // The timer panel shows a warning for this many seconds before ROUND_TIMEOUT_MS.
+      TIMER_WARNING_SECONDS: 10,
       // Backstop `round_timeout` after the limit, for when the matcher's submission never arrives
       // (e.g. a frozen tab). That round ends without feedback, still as a timeout.
       ROUND_TIMEOUT_GRACE_MS: 5000,
@@ -456,13 +566,15 @@
          <li>The shapes are arranged differently on your two screens. Describe the shape itself,
              rather than its position.</li>
          <li>You have ${roundSeconds} seconds to describe and pick a tangram. A countdown on every
-             trial shows the time remaining. If time runs out before the Matcher picks, you both
-             see a "Time's up" message (the Matcher also sees the correct shape), then move on to
-             the next trial.</li>
+             trial shows the time remaining and warns you in the last
+             ${CONFIG.TIMER_WARNING_SECONDS} seconds. If time runs out before the Matcher picks, you
+             both see a "Time's up" message (the Matcher also sees the correct shape), then move on
+             to the next trial.</li>
          <li>If you're inactive for a while, a message will ask you to click a button to show
              you're still with us.</li>
-         <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
-             Matcher picked a different one, their pick is outlined in blue.</li>
+         <li>After the choice, you both see "Correct!" or "Incorrect." The correct shape is outlined
+             in green on the Matcher's screen. If the Matcher picked a different one, their pick is
+             outlined in blue.</li>
        </ul>
        <p>There are ${totalRounds} trials, with no breaks.</p>
        <p>${CONFIG.COMPREHENSION_CHECK ? "Next, answer three quick questions about the task. Then you" : "Next you"}
@@ -663,8 +775,8 @@
               <p>Use the <strong>chat box below the shapes</strong>. You <strong>must send at least one
                  message every round</strong> — your partner can't click until you do.</p>
               <p>After each choice you'll see your partner's pick outlined in green. Green on your
-                 screen marks their pick, not necessarily the right answer, so check the score at
-                 the top.</p>
+                 screen marks their pick, not necessarily the right answer. The message above the
+                 shapes says <strong>Correct!</strong> or <strong>Incorrect.</strong></p>
               <p>You will stay the <strong>Director for the whole game</strong>.
                  Roles do not switch.</p>`;
             const matcherCopy = `
@@ -838,9 +950,8 @@
         const score = finished.filter({ correct: true }).count();
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
-        const header = `<p>Trial ${roundNum} of ${SCHEDULE.length} &nbsp;|&nbsp; Number correct: ${score}
-          &nbsp;|&nbsp; Time remaining: <span id="round-remaining">${roundSeconds}s</span></p>
-          <p id="round-note" class="hk-round-note" aria-live="polite"></p>`;
+        // Separate progress, score and timer panels (hawkins-ui.js), then the round's result line.
+        const header = HawkinsUI.header({ round: roundNum, total: SCHEDULE.length, score, seconds: roundSeconds });
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -855,9 +966,13 @@
         // The plugin starts its wall-clock timers during synchronous trial setup, just before
         // jsPsych calls on_load. Stop this display when feedback begins (inFeedbackPhase) or the
         // trial ends. A submission the selection_timeout made carries `timed_out: true`.
+        const display = jsPsych.getDisplayElement();
+        HawkinsUI.chat(display, myRole);
         const remaining = document.getElementById("round-remaining");
-        const note = document.getElementById("round-note");
         const deadline = Date.now() + CONFIG.ROUND_TIMEOUT_MS;
+        // The result shown is scored from the submitted assignment against this round's targets, as
+        // the saved row is (Hawkins.submissionResult), never from the matcher's reported n_correct.
+        const targets = jsPsych.evaluateTimelineVariable("targets");
         const witness = Hawkins.createDeadlineWitness(myRole, participantId, partnerId);
         deadlineWitness = witness;
         try {
@@ -884,19 +999,22 @@
           const cause = described > 0
             ? "The Matcher didn't pick a shape this round."
             : "The Director didn't send a description this round.";
-          note.textContent =
-            myRole === "matcher"
-              ? `Time's up! ${cause} The correct shape is outlined in green.`
-              : `Time's up! ${cause}`;
-          note.classList.add("is-timeout");
+          HawkinsUI.result(display, "timeout", myRole === "matcher"
+            ? `Time's up! ${cause} The correct shape is outlined in green.`
+            : `Time's up! ${cause}`);
           return witness.count !== null;
         };
         const update = () => {
-          const submission = roundSubmissionNow();
-          if (!submission) {
-            remaining.textContent = `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))}s`;
-          } else if (!submission.timed_out) {
+          const result = Hawkins.submissionResult(roundSubmissionNow(), targets);
+          // The warning follows the same deadline as the countdown and stops with the round.
+          const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+          HawkinsUI.timer(display, seconds, CONFIG.TIMER_WARNING_SECONDS, result === null);
+          if (result === null) {
+            remaining.textContent = `${seconds}s`;
+          } else if (result !== "timeout") {
             remaining.textContent = "Selection complete";
+            // The score panel becomes the saved count plus this round, if it was correct.
+            HawkinsUI.result(display, result);
             clearInterval(countdownInterval);
           } else {
             remaining.textContent = "Time's up";

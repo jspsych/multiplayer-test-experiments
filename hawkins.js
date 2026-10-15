@@ -181,6 +181,24 @@
     return roundSubmission(group) !== null;
   }
 
+  // The round's result as the participants should see it: "correct", "incorrect" or "timeout" for
+  // the matcher's submitted choice (roundSubmission), or null before there is one. It scores the
+  // submitted assignment against the round's `targets` the way the plugin scores the row (ordered
+  // when there is more than one target), so it always agrees with the saved `correct` and with
+  // classifyRound's `round_result`. A `selection_timeout` submission is a timeout, never incorrect.
+  // The `n_correct` the matcher reports in its submission is not read.
+  function submissionResult(submission, targets) {
+    if (!isObject(submission) || !isObject(submission.assignment)) return null;
+    if (submission.timed_out === true) return "timeout";
+    const list = Array.isArray(targets) ? targets : [];
+    const picks = submission.assignment;
+    const correct =
+      list.length > 1
+        ? list.every((target, i) => picks[i + 1] === target)
+        : list.length === 1 && Object.values(picks).includes(list[0]);
+    return correct ? "correct" : "incorrect";
+  }
+
   // ---- Completion codes -----------------------------------------------------------------------
 
   // Stand-ins for the real Prolific codes during setup. The page labels them as test codes, and
@@ -239,6 +257,7 @@
     createJatosSink,
     combineSaveResults,
     roundHasSubmission,
+    submissionResult,
     PLACEHOLDER_CODES,
     isPlaceholderCode,
     isRealCode,
