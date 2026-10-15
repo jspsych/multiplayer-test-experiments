@@ -9,7 +9,7 @@ live, version, and be piloted independently.
 
 - [`reference-game-hawkins.html`](reference-game-hawkins.html) — replicates Hawkins, Frank & Goodman
   (2020), *Cognitive Science* 44, e12845. Sequential condition: single target per trial, one click.
-  Currently the paid-pilot build: 36 trials, with Prolific exits, dropout
+  Currently the paid-pilot build: 18 trials, with Prolific exits, dropout
   handling and data saving. Runs on the local adapter or as a JATOS group study.
 - [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, idle detection, exit
   routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
@@ -29,7 +29,7 @@ live, version, and be piloted independently.
 | --- | --- | --- |
 | Replicates | Hawkins, Frank & Goodman (2020) | Clark & Wilkes-Gibbs (1986) |
 | Condition | Sequential — single target, one click | Full-board — all 12 tangrams as an ordered target |
-| Schedule | 72 trials in the original; 36 balanced trials in the paid pilot | 6 trials, fresh full-board order each |
+| Schedule | 72 trials in the original; 18 trials (3 blocks × 6 assigned targets) in the paid pilot | 6 trials, fresh full-board order each |
 | Fidelity note | Near-exact, including Exp. 2's matcher-click gate (`require_message_before_response: true`) | Text chat substitutes for the original spoken dialogue — the one deliberate deviation, noted in-file |
 
 Both fix director/matcher for the whole game, reveal the target to the director only, and use
@@ -45,8 +45,10 @@ original hawkrobe/tangrams experiment code, and play-tested two-tab at full sche
 
 The proposed first paid Prolific run is now a shortened Hawkins-style multiplayer pilot, built from
 the Hawkins fidelity work in PR #19 (`hawkins-cued-fidelity`) rather than from the older prototype
-file in the C&WG infrastructure stack. The working design is 36 continuous trials, with each of the
-12 tangrams appearing three times as the target.
+file in the C&WG infrastructure stack. The working design is 18 continuous trials in three blocks of six. Each dyad receives a random
+subset of six of the twelve tangrams as targets, repeated once per block in a fresh shuffled order.
+All twelve tangrams remain visible on every trial. The subset and schedule use shared session
+randomness, and `assigned_target_ids` is saved on every row.
 That is an intentional adaptation: the main goal of the first paid run is to prove the multiplayer
 pipeline, including pairing, data saving, terminal routes, and participant handling. The
 reference-shortening replication is still a scientific target, but the shortened pilot should not be

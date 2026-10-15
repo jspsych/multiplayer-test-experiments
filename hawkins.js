@@ -8,14 +8,20 @@
 (function (global) {
   // ---- Schedule -------------------------------------------------------------------------------
 
-  // Hawkins "sequential" schedule: `blocks` repetition blocks, each a fresh order of every tangram,
+  // Hawkins "sequential" schedule: `blocks` repetition blocks, each a fresh order of the selected tangrams,
   // so each tangram is the single target exactly once per block. `shuffle(key, array)` must return
   // the same order for everyone in the group; in the browser it is jsPsych.multiplayer.shuffle,
   // which is seeded by the session ID, so each dyad gets its own order without sending anything.
-  function sequentialSchedule(blocks, ids, shuffle) {
+  function sequentialSchedule(blocks, ids, shuffle, targetsPerBlock = ids.length) {
+    if (!Number.isInteger(targetsPerBlock) || targetsPerBlock < 1 || targetsPerBlock > ids.length) {
+      throw new RangeError("targetsPerBlock must be between 1 and the number of stimuli");
+    }
+    const selected = targetsPerBlock === ids.length
+      ? ids.slice()
+      : shuffle("schedule-target-subset", ids).slice(0, targetsPerBlock);
     const rounds = [];
     for (let b = 0; b < blocks; b++) {
-      for (const id of shuffle(`schedule-block-${b}`, ids)) {
+      for (const id of shuffle(`schedule-block-${b}`, selected)) {
         rounds.push({ round: rounds.length, block: b, targets: [id] });
       }
     }

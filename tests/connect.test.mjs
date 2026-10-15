@@ -13,9 +13,12 @@ function setup({ connectFails = false, restarted = false, stored = null } = {}) 
   const added = [];
   const context = vm.createContext({
     onJatos: false,
-    CONFIG: { BLOCKS: 3, DROPOUT_TIMEOUT_MS: 30000, RECONNECT_GIVE_UP_MS: 60000 },
-    SHAPES: [{ id: "A" }, { id: "B" }],
-    Hawkins: { sequentialSchedule: (blocks, ids) => Array.from({ length: blocks }, () => ids).flat() },
+    CONFIG: { BLOCKS: 3, TARGETS_PER_BLOCK: 2, DROPOUT_TIMEOUT_MS: 30000, RECONNECT_GIVE_UP_MS: 60000 },
+    SHAPES: [{ id: "C" }, { id: "A" }, { id: "B" }],
+    Hawkins: {
+      sequentialSchedule: (blocks, ids, shuffle, perBlock) => Array.from({ length: blocks }, (_, block) =>
+        ids.slice(0, perBlock).map((id) => ({ block, targets: [id] }))).flat(),
+    },
     jsPsychAdapterMultiplayerLocal: class {},
     jsPsychCallFunction: {},
     sessionStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) },
@@ -66,7 +69,7 @@ test("a successful connect builds the shared schedule for the game loop", async 
   assert.equal(state.SCHEDULE.length, 6);
   assert.equal(state.gameLoop.timeline_variables, state.SCHEDULE);
   assert.equal(run.storage.get("hawkins-connected"), "1");
-  assert.deepEqual(JSON.parse(JSON.stringify(run.added)), [{ config_trials: 6 }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(run.added)), [{ config_trials: 6, assigned_target_ids: ["A", "C"] }]);
 });
 
 test("a failed connect routes to the no-match exit", async () => {

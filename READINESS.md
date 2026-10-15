@@ -21,7 +21,8 @@ without waiting on upstream.
 
 **Current direction: run a shortened Hawkins-style pilot first, built from PR #19
 (`hawkins-cued-fidelity`).** The proposed first paid run is not the full 6-block / 72-round Hawkins
-replication. It is a 3-block / 36-round multiplayer pilot whose primary goal is to prove the paid-run
+replication. It is a 3-block / 18-round multiplayer pilot (six of the twelve tangrams per dyad, each the target
+once per block) whose primary goal is to prove the paid-run
 pipeline: pairing, data egress, terminal routing, participant handling, and operational cost. The
 reference-shortening effect remains a scientific target, but the shortened design should be described
 as an adapted Hawkins pilot rather than a full replication.
@@ -112,13 +113,13 @@ round**, starting a fresh timer. There is no cross-round abort and no presence c
 | | per-round dead wait | rounds left if partner drops on round 1 | total dead time |
 | --- | --- | --- | --- |
 | **Hawkins, full 6-block replication** | 60 s | 71 | **~71 min** |
-| **Hawkins, proposed 3-block pilot** | 60 s | 35 | **~35 min** |
+| **Hawkins, proposed 3-block / 18-round pilot** | 60 s | 17 | **~17 min** |
 | **C&WG** | 180 s | 5 | **~15 min** |
 
 And the survivor is **never told anything**. The plugin contains no partner-status copy, no
 "disconnected" state, no UI affordance — searching for waiting/partner-status strings returns
 nothing. In the proposed Hawkins pilot, they could still see a normal, fully interactive board that
-simply never responds for up to 36 rounds. That is better than the full 72-round replication, but it
+simply never responds for up to 18 rounds. That is better than the full 72-round replication, but it
 is still not an acceptable paid-study experience.
 
 Realistically they abandon within minutes, so **the survivor is lost too**, and their data never
@@ -135,7 +136,7 @@ leaves the browser (§3). One dropout burns two payments *and* generates a suppo
 - [ ] A **survivor payment path**: partial completion code, data flushed, honest debrief. Highest
       value item in this section and **not blocked upstream** — two or three consecutive
       `ended_by: "timeout"` rounds is a perfectly good dropout proxy, no presence API required.
-- [ ] A decision on **partial-data usability**. In the proposed 36-round Hawkins pilot, a dyad that
+- [ ] A decision on **partial-data usability**. In the proposed 18-round Hawkins pilot, a dyad that
       dies after one or two blocks may still provide useful operational data and a partial learning
       curve. Requires `n_trials_completed`, `blocks_completed`, and the configured block count in the
       data. **This decision determines what the abort path does, so make it first.**
@@ -172,7 +173,7 @@ Read from source (`jspsych/datapipe`, `origin/main`, `functions/src/api-data.ts`
 
 **`sessions` increments on every successful save call, not once per participant.** The cap is checked
 before anything else, and exceeding it returns a 400 and drops the data. A naive per-round save in a
-36-round Hawkins pilot would consume roughly **37 sessions per participant** (36 rounds + final
+18-round Hawkins pilot would consume roughly **19 sessions per participant** (18 rounds + final
 flush), not 1. That makes a participant-sized `limitSessions` cap even more dangerous than it was for
 the 6-round C&WG design.
 
@@ -317,8 +318,8 @@ can reduce the number of dyads that must be started to reach the same number of 
 
 A 33% Prolific service fee applies on top of participant pay throughout.
 
-**Hawkins, proposed 3-block pilot** (~30 min placeholder: instructions + comprehension + lobby + 36
-single-target rounds) → $7.50/participant, **$9.98 all-in**. Attrition is multiplicative on dyads;
+**Hawkins, proposed 3-block pilot** (~30 min placeholder, set for the earlier 36-round design and not yet
+re-estimated: instructions + comprehension + lobby + 18 single-target rounds) → $7.50/participant, **$9.98 all-in**. Attrition is multiplicative on dyads;
 until the first pilot measures it directly, assume something between the old C&WG estimate and the
 full Hawkins estimate. At ~20% per-participant mid-task dropout, dyad survival ≈ 0.64:
 
@@ -351,7 +352,7 @@ as a multiplayer-pipeline pilot for the Hawkins-style task, with replication as 
   *concurrently*, which Prolific does not guarantee. You control it by launching in a tight burst
   rather than leaving the study open — which is why the waiting room and its timeout policy are
   load-bearing on cost, not just on UX.
-- **Partial-data salvage.** With 36 Hawkins rounds, a dyad dying after block 1 or block 2 may still
+- **Partial-data salvage.** With 18 Hawkins rounds, a dyad dying after block 1 or block 2 may still
   answer operational questions and contribute to a partial shortening curve. If the analysis can use
   partial dyads, effective attrition cost drops substantially.
 
@@ -524,8 +525,8 @@ same commit as the adapter swap. **#12** last.
 C&WG stack already contains useful implementations of identifiers, DataPipe egress, completion-code
 routing, dropout aborts, no-match exits, and terminal-route tests, but those are now source material
 to port rather than the target of the first launch. Keep the three-block decision explicit in
-configuration and saved data (`config_blocks: 3`, `config_trials: 36`, and a pilot/study-variant
-field), because a shortened Hawkins pilot is not a full six-block replication.
+configuration and saved data (`config_blocks: 3`, `config_targets_per_block: 6`, `config_trials: 18`,
+`assigned_target_ids`, and a pilot/study-variant field), because a shortened Hawkins pilot is not a full six-block replication.
 
 ### Phase 1 — now, no upstream dependency
 
@@ -539,8 +540,8 @@ field), because a shortened Hawkins pilot is not a full six-block replication.
       `study_variant`).
 - [ ] [#5](https://github.com/jspsych/multiplayer-test-experiments/issues/5) — **Timeout-based
       dropout detection + abort path** (N consecutive `ended_by: "timeout"` → flush data → "partner
-      disconnected" screen → partial completion code). Kills the 35-minute three-block survivor
-      grind with no presence API.
+      disconnected" screen → partial completion code). Kills the survivor grind (up to ~17
+      minutes in the 18-round pilot) with no presence API.
 - [ ] [#6](https://github.com/jspsych/multiplayer-test-experiments/issues/6) — **Lobby timeout +
       no-match exit + payment path**, and fix the spectator dead-end.
 - [ ] [#7](https://github.com/jspsych/multiplayer-test-experiments/issues/7) — **Completion codes +
