@@ -16,6 +16,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const started = Date.now();
 const records = [];
 const browsers = [];
+let peakActiveGameplay = 0;
 const metadata = { run, pairs, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   runnerSha256: (await import('node:crypto')).createHash('sha256').update(await (await import('node:fs/promises')).readFile(import.meta.filename)).digest('hex'),
   playwrightVersion: JSON.parse(await (await import('node:fs/promises')).readFile(new URL('../.build/load-tools/node_modules/playwright/package.json', import.meta.url))).version,
@@ -24,6 +25,7 @@ const metadata = { run, pairs, sourceCommit: execFileSync('git', ['rev-parse', '
 await writeFile(resolve(out, 'metadata.json'), JSON.stringify(metadata, null, 2));
 const event = async data => appendFile(resolve(out, 'events.jsonl'), JSON.stringify({ elapsedMs: Date.now() - started, ...data }) + '\n');
 let stopping = false;
+let stopLaunching = false;
 let previousCPU = os.cpus().map(c => c.times).reduce((a, t) => ({ idle: a.idle + t.idle, total: a.total + Object.values(t).reduce((s, x) => s + x, 0) }), { idle: 0, total: 0 });
 let previousTick = Date.now();
 let pressureTicks = 0;
@@ -40,17 +42,23 @@ const monitor = setInterval(() => {
   console.log(JSON.stringify(sample));
 }, 10000);
 async function participant(browser, index) {
-  const record = { index, syntheticId: `${run}-${index}`, errors: [], httpFailures: [], uploads: [], done: false };
+  const record = { index, syntheticId: `${run}-${index}`, errors: [], consoleErrors: [], httpFailures: [], uploads: [], done: false };
   records.push(record);
   let context, page;
+  const responseReads = [];
   try {
     record.requestDurations = [];
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     page = await context.newPage();
     page.on('pageerror', e => record.errors.push(String(e)));
+    page.on('console', message => { if (message.type() === 'error') record.consoleErrors.push(message.text()); });
     page.on('response', response => {
       const u = new URL(response.url());
-      if (response.status() >= 400) record.httpFailures.push({ host: u.host, path: u.pathname, status: response.status() });
+      if (response.status() >= 400) {
+        const failure = { host: u.host, path: u.pathname, status: response.status() };
+        record.httpFailures.push(failure);
+        responseReads.push(response.text().then(body => { failure.body = body.slice(0, 3000); }).catch(e => { failure.bodyReadError = String(e); }));
+      }
       if (response.request().method() === 'POST') record.uploads.push({ host: u.host, path: u.pathname, status: response.status(), elapsedMs: Date.now() - started });
     });
     page.on('requestfailed', request => record.httpFailures.push({ url: request.url().split('?')[0], error: request.failure()?.errorText }));
@@ -80,7 +88,7 @@ async function participant(browser, index) {
         const jp = typeof jsPsych === 'undefined' ? null : jsPsych;
         return { role: document.body?.dataset.role, dyad: jp?.multiplayer?.sessionId,
           round: game ? (window.hawkinsCoordinationSnapshot?.roundId ?? jp.evaluateTimelineVariable('round')) : null,
-          active: game && (document.querySelector('[data-coordination-phase]')?.dataset.coordinationPhase === 'active'),
+          game, active: game && (document.querySelector('[data-coordination-phase]')?.dataset.coordinationPhase === 'active'),
           target: document.querySelector('.jspsych-multiplayer-reference-game-cell.is-target')?.dataset.objectId,
           chat: document.querySelector('.jspsych-multiplayer-reference-game-chat-log')?.textContent,
           canChat: !!input && !input.disabled,
@@ -115,6 +123,7 @@ async function participant(browser, index) {
         }
       }
       record.lastState = state;
+      peakActiveGameplay = Math.max(peakActiveGameplay, records.filter(r => !r.done && !r.failure && r.lastState?.game).length);
       await sleep(700);
     }
     if (!record.done && !record.failure) record.failure = stopping ? 'Stage stopped' : '15 minute participant deadline';
@@ -125,8 +134,10 @@ async function participant(browser, index) {
       await page.screenshot({ path: resolve(out, `failure-${index}.png`) }).catch(() => {});
       record.rows ??= await page.evaluate(() => typeof jsPsych !== 'undefined' ? jsPsych.data.get().values() : []).catch(() => []);
     }
+    await Promise.race([Promise.allSettled(responseReads), sleep(5000)]);
     await writeFile(resolve(out, `participant-${index}.json`), JSON.stringify(record, null, 2));
-    if (record.failure) stopping = true;
+    // Failure prevents new arrivals/escalation, but already-started partners may finish and save.
+    if (record.failure) stopLaunching = true;
     await context?.close().catch(() => {});
   }
 }
@@ -136,7 +147,7 @@ try {
     args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding'] }));
   metadata.browserVersion = browsers[0].version();
   const jobs = [];
-  for (let i = 0; i < pairs * 2 && !stopping; i++) {
+  for (let i = 0; i < pairs * 2 && !stopping && !stopLaunching; i++) {
     jobs.push(participant(browsers[Math.floor(i / 20)], i));
     await sleep(200);
   }
@@ -151,16 +162,22 @@ try {
     const rounds = members.map(m => (m.rows ?? []).filter(r => r.trial_type === 'multiplayer-reference-game'));
     if (members.length !== 2 || rounds.some(r => r.length !== 20)) problems.push({ dyad, issue: 'Expected two members and 20 rounds per member', roundCounts: rounds.map(r => r.length) });
     if (members.length === 2 && JSON.stringify(rounds[0].map(r => r.targets)) !== JSON.stringify(rounds[1].map(r => r.targets))) problems.push({ dyad, issue: 'Target schedule mismatch' });
+    if (rounds.flat().some(r => !r.correct || r.timed_out || r.coordination_failure)) problems.push({ dyad, issue: 'Round incorrect, timed out or coordination failed' });
+    if (members.some(m => (m.rows ?? []).some(r => String(r.multiplayer_session_id) !== String(dyad)))) problems.push({ dyad, issue: 'Missing or inconsistent saved dyad identifier' });
+    if (members.length === 2 && new Set(rounds.flat().map(r => r.role)).size !== 2) problems.push({ dyad, issue: 'Expected complementary roles' });
   }
   const percentile = (values, p) => { const sorted = values.toSorted((a, b) => a - b); return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : null; };
   const summary = { ...metadata, elapsedMs: Date.now() - started, launched: records.length, completed: records.filter(r => r.done).length,
     failures: records.filter(r => r.failure).map(r => ({ index: r.index, failure: r.failure })), dyadCount: dyads.length, problems,
     httpFailureCount: records.reduce((n, r) => n + r.httpFailures.length, 0), jsErrorCount: records.reduce((n, r) => n + r.errors.length, 0),
-    serverReadbackVerified: false, resources,
+    serverReadbackVerified: false, resources, peakActiveGameplay,
     pairingMs: { p50: percentile(records.map(r => r.pairedMs).filter(Number.isFinite), .5), p95: percentile(records.map(r => r.pairedMs).filter(Number.isFinite), .95) },
     postRequestMs: { p50: percentile(records.flatMap(r => r.requestDurations ?? []).filter(r => r.method === 'POST').map(r => r.ms), .5), p95: percentile(records.flatMap(r => r.requestDurations ?? []).filter(r => r.method === 'POST').map(r => r.ms), .95) } };
   summary.pass = summary.completed === pairs * 2 && !summary.failures.length && !problems.length && summary.dyadCount === pairs && !summary.httpFailureCount && !summary.jsErrorCount;
   await writeFile(resolve(out, 'summary.json'), JSON.stringify(summary, null, 2));
-  console.log(JSON.stringify({ ...summary, out }, null, 2));
+  console.log(JSON.stringify({ ...summary, resources: { samples: resources.length,
+    minFreeMemoryGB: Math.min(...resources.map(r => r.freeMemoryGB)),
+    maxCpuBusyPercent: Math.max(...resources.map(r => r.cpuBusyPercent)),
+    maxEventLoopDelayMs: Math.max(...resources.map(r => r.eventLoopDelayMs)) }, out }, null, 2));
   if (!summary.pass) process.exitCode = 1;
 }
