@@ -14,9 +14,10 @@ live, version, and be piloted independently.
 - [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, round classification,
   exit routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
 - [`presence-check.js`](presence-check.js) — a jsPsych extension on each Hawkins round: after 30s
-  with no mouse, keyboard, scroll or touch activity it asks "Are you still with us?" and waits 15s
-  for a button click. A reminder only: missed prompts are recorded (`presence_*` fields) but never
-  end the round or the game.
+  with no mouse, keyboard, wheel or touch input from the participant (script-dispatched events and
+  the chat log's own scrolling don't count) it asks "Are you still with us?" and waits 15s for a
+  button click. It stays out of feedback. A reminder only: missed prompts and clicks on its backdrop
+  are recorded (`presence_*` fields) but never end the round or the game.
 - [`scripts/vendor.mjs`](scripts/vendor.mjs) — fills the gitignored `vendor/` with every script the
   Hawkins page loads, at pinned versions. [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
   the page as a JATOS study archive.

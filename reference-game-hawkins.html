@@ -820,14 +820,13 @@
       round_timeout: CONFIG.ROUND_TIMEOUT_MS + CONFIG.ROUND_TIMEOUT_GRACE_MS,
       // A partner who leaves ends the round with multiplayer_outcome: "participant_left".
       end_on_participant_left: true,
-      // Suppressed during feedback (chat disabled) so it never covers the round's result.
+      // Suppressed once feedback starts (inFeedbackPhase), so it never covers the round's result.
       extensions: [{
         type: jsPsychExtensionPresenceCheck,
         params: {
           prompt_after: CONFIG.PRESENCE_PROMPT_MS,
           respond_within: CONFIG.PRESENCE_RESPONSE_MS,
-          paused: () =>
-            Boolean(document.querySelector(".jspsych-multiplayer-reference-game-chat-input")?.disabled),
+          paused: () => inFeedbackPhase(),
         },
       }],
       save_interaction_history: true,

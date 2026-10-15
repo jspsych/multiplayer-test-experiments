@@ -1,11 +1,18 @@
 // =================================================================================================
 // "Are you still with us?" reminder, as a jsPsych extension for reference-game-hawkins.html.
 //
-// While a trial runs, any mouse movement, click, key press, scroll or touch resets an inactivity
-// clock. After `prompt_after` ms with no activity a dialog asks the participant to click a button.
+// While a trial runs, the participant's own mouse movement, clicks, key presses, typing, wheel
+// scrolling or touches reset an inactivity clock. Only trusted (user-generated) events count, and
+// there is no plain `scroll` listener: the plugin scrolls the chat log itself when the partner's
+// messages arrive, and neither that nor a script-dispatched event shows this participant is there.
+// After `prompt_after` ms with no activity a dialog asks the participant to click a button.
 // Once the dialog is up, only that button counts as a response: movement no longer dismisses it.
 // Unanswered after `respond_within` ms, it closes and counts as missed. It is a reminder only:
 // it never ends the trial or the game, and it never touches the trial's own timers.
+//
+// Clicks on the dialog's backdrop (outside its card) are counted per prompt as `backdrop_clicks`,
+// with the round total in `presence_backdrop_clicks`, so the data shows whether someone tried to
+// act on the round through the dialog.
 //
 // `paused()` (optional) suppresses the reminder, e.g. during feedback; a dialog that is open when
 // it starts returning true closes as "interrupted", as does one still open when the trial ends.
@@ -17,7 +24,7 @@
   function createPresenceMonitor({ promptAfter, respondWithin, now, onShow, onHide }) {
     const startedAt = now();
     let lastActivity = startedAt;
-    let open = null; // { shownAt } while the dialog is up
+    let open = null; // { shownAt, backdropClicks } while the dialog is up
     const events = [];
 
     function close(outcome) {
@@ -26,6 +33,7 @@
         shown_at: open.shownAt - startedAt,
         outcome,
         rt: outcome === "responded" ? t - open.shownAt : null,
+        backdrop_clicks: open.backdropClicks,
       });
       open = null;
       lastActivity = t;
@@ -39,6 +47,9 @@
       respond() {
         if (open) close("responded");
       },
+      backdropClick() {
+        if (open) open.backdropClicks += 1;
+      },
       tick(paused = false) {
         const t = now();
         if (paused) {
@@ -47,7 +58,7 @@
         } else if (open) {
           if (t - open.shownAt >= respondWithin) close("missed");
         } else if (t - lastActivity >= promptAfter) {
-          open = { shownAt: t };
+          open = { shownAt: t, backdropClicks: 0 };
           onShow();
         }
       },
@@ -64,16 +75,33 @@
           presence_responded: count("responded"),
           presence_missed: count("missed"),
           presence_interrupted: count("interrupted"),
+          presence_backdrop_clicks: events.reduce((n, e) => n + e.backdrop_clicks, 0),
           presence_events: events.slice(),
         };
       },
     };
   }
 
+  // User input only. `wheel` and `touchmove` stand in for scrolling, since a `scroll` event also
+  // fires when the page scrolls itself (the plugin pins the chat log to new partner messages).
   const ACTIVITY_EVENTS = [
-    "mousemove", "mousedown", "pointerdown", "click", "keydown", "input", "wheel", "scroll", "touchstart",
+    "mousemove", "mousedown", "pointerdown", "click", "keydown", "input", "wheel", "touchstart", "touchmove",
   ];
   const TICK_MS = 250;
+
+  // Event handlers for a monitor. `isTrusted` is injectable so tests can drive them with plain
+  // objects; in the page it is the browser's own flag, false for any script-dispatched event.
+  function createEventHandlers(monitor, { backdrop, isTrusted = (event) => event.isTrusted === true } = {}) {
+    return {
+      activity(event) {
+        if (isTrusted(event)) monitor.activity();
+      },
+      backdropClick(event) {
+        // Only the backdrop itself, not the card or its button.
+        if (isTrusted(event) && event.target === backdrop) monitor.backdropClick();
+      },
+    };
+  }
 
   class PresenceCheckExtension {
     static info = { name: "presence-check", version: "0.1.0", data: {} };
@@ -133,7 +161,9 @@
           previousFocus = null;
         },
       });
-      const onActivity = () => monitor.activity();
+      const handlers = createEventHandlers(monitor, { backdrop: dialog });
+      const onActivity = handlers.activity;
+      const onBackdropClick = handlers.backdropClick;
       const onClick = () => monitor.respond();
       // The reminder has one control. Both Tab directions stay on it, and focus cannot move
       // into the underlying round while the modal is open.
@@ -151,6 +181,7 @@
         document.addEventListener(type, onActivity, { capture: true, passive: true });
       }
       button.addEventListener("click", onClick);
+      dialog.addEventListener("click", onBackdropClick);
       document.addEventListener("keydown", onKeydown, true);
       document.addEventListener("focusin", onFocus, true);
       const interval = setInterval(() => {
@@ -161,7 +192,7 @@
         }
       }, TICK_MS);
 
-      this.state = { monitor, dialog, interval, onActivity, onClick, onKeydown, onFocus, button };
+      this.state = { monitor, dialog, interval, onActivity, onClick, onBackdropClick, onKeydown, onFocus, button };
     }
 
     on_finish() {
@@ -174,6 +205,7 @@
         document.removeEventListener(type, s.onActivity, { capture: true });
       }
       s.button.removeEventListener("click", s.onClick);
+      s.dialog.removeEventListener("click", s.onBackdropClick);
       document.removeEventListener("keydown", s.onKeydown, true);
       document.removeEventListener("focusin", s.onFocus, true);
       s.dialog.remove();
@@ -181,6 +213,6 @@
     }
   }
 
-  global.PresenceCheck = { createPresenceMonitor };
+  global.PresenceCheck = { createPresenceMonitor, createEventHandlers, ACTIVITY_EVENTS };
   global.jsPsychExtensionPresenceCheck = PresenceCheckExtension;
 })(typeof globalThis !== "undefined" ? globalThis : this);

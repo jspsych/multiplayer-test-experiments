@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import "../presence-check.js";
 
-const { createPresenceMonitor } = globalThis.PresenceCheck;
+const { createPresenceMonitor, createEventHandlers, ACTIVITY_EVENTS } = globalThis.PresenceCheck;
 
 function setup() {
   let t = 0;
@@ -64,7 +64,7 @@ test("a button click responds and restarts the inactivity clock", () => {
   assert.equal(shown.length, 1);
   at(64000);
   assert.equal(shown.length, 2);
-  assert.deepEqual(monitor.summary().presence_events[0], { shown_at: 30000, outcome: "responded", rt: 4000 });
+  assert.deepEqual(monitor.summary().presence_events[0], { shown_at: 30000, outcome: "responded", rt: 4000, backdrop_clicks: 0 });
 });
 
 test("a missed prompt is recorded and the reminder carries on", () => {
@@ -96,7 +96,7 @@ test("stopping with the prompt open records it as interrupted", () => {
   const { monitor, at } = setup();
   at(30000);
   monitor.stop();
-  assert.deepEqual(monitor.summary().presence_events, [{ shown_at: 30000, outcome: "interrupted", rt: null }]);
+  assert.deepEqual(monitor.summary().presence_events, [{ shown_at: 30000, outcome: "interrupted", rt: null, backdrop_clicks: 0 }]);
   monitor.stop();
   assert.equal(monitor.summary().presence_prompts, 1);
 });
@@ -108,4 +108,57 @@ test("the page attaches the reminder to game rounds and ships it in the archive"
   assert.match(html, /prompt_after: CONFIG\.PRESENCE_PROMPT_MS/);
   const jzip = fs.readFileSync(new URL("../scripts/make-jzip.mjs", import.meta.url), "utf8");
   assert.match(jzip, /"presence-check.js"/);
+});
+
+// The page's handlers, with the browser's isTrusted flag on plain event objects.
+function handlersFor(monitor) {
+  const backdrop = { id: "backdrop" };
+  const handlers = createEventHandlers(monitor, { backdrop });
+  return { handlers, backdrop };
+}
+
+test("only trusted events count as activity", () => {
+  const { monitor, at, set, shown } = setup();
+  const { handlers } = handlersFor(monitor);
+  set(20000);
+  handlers.activity({ type: "mousemove", isTrusted: false }); // script-dispatched
+  at(30000);
+  assert.deepEqual(shown, [30000], "an untrusted event did not reset the clock");
+  monitor.respond();
+  set(40000);
+  handlers.activity({ type: "keydown", isTrusted: true });
+  at(69999);
+  assert.equal(shown.length, 1, "a trusted event reset the clock");
+  at(70000);
+  assert.equal(shown.length, 2);
+});
+
+test("the plugin scrolling the chat log is not activity", () => {
+  assert.equal(ACTIVITY_EVENTS.includes("scroll"), false);
+  for (const type of ["wheel", "touchmove", "keydown", "input", "mousemove"]) assert.ok(ACTIVITY_EVENTS.includes(type), type);
+});
+
+test("backdrop clicks are counted per prompt and per round", () => {
+  const { monitor, at, set } = setup();
+  const { handlers, backdrop } = handlersFor(monitor);
+  handlers.backdropClick({ target: backdrop, isTrusted: true }); // no prompt open: ignored
+  at(30000);
+  handlers.backdropClick({ target: backdrop, isTrusted: true });
+  handlers.backdropClick({ target: backdrop, isTrusted: true });
+  handlers.backdropClick({ target: { id: "card" }, isTrusted: true }); // the card, not the backdrop
+  handlers.backdropClick({ target: backdrop, isTrusted: false }); // script-dispatched
+  set(33000);
+  monitor.respond();
+  at(63000);
+  handlers.backdropClick({ target: backdrop, isTrusted: true });
+  at(78000); // missed
+  const s = monitor.summary();
+  assert.deepEqual(s.presence_events.map((e) => [e.outcome, e.backdrop_clicks]), [["responded", 2], ["missed", 1]]);
+  assert.equal(s.presence_backdrop_clicks, 3);
+});
+
+test("the reminder pauses on the shared feedback-phase signal", () => {
+  const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
+  assert.match(html, /paused: \(\) => inFeedbackPhase\(\)/);
+  assert.doesNotMatch(html, /chat-input"\)\?\.disabled/);
 });
