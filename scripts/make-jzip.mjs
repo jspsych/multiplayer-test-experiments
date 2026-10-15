@@ -1,8 +1,13 @@
 /**
  * One-command JATOS study packager for the Hawkins pilot prototype.
  *
- * Usage: node scripts/make-jzip.mjs
+ * Usage: node scripts/make-jzip.mjs [--allow-placeholder-codes]
  * Output: reference-game-hawkins-jatos-prototype.jzip at the repo root.
+ *
+ * The archive is what participants run, so the build stops while any Prolific completion code in
+ * the page's CONFIG.COMPLETION_CODES is empty or a placeholder (Hawkins.PLACEHOLDER_CODES): such a
+ * code would send paid participants to Prolific with a code it rejects. Pass
+ * --allow-placeholder-codes for a test build; the study's JATOS comments then say so.
  *
  * Why this exists (verified against JATOS 3.11.x source, not guessed):
  * JATOS "Import Study" does NOT accept a zip of bare study files. Its
@@ -36,6 +41,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import "../hawkins.js";
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -55,6 +61,45 @@ const BATCH = {
   allowedWorkerTypes: ["GeneralSingle", "GeneralMultiple"],
 };
 const OUT_NAME = process.env.JZIP_OUT ?? "reference-game-hawkins-jatos-prototype.jzip";
+
+// ---- Completion-code guard
+const ALLOW_PLACEHOLDER_CODES = process.argv.includes("--allow-placeholder-codes");
+
+// Reads `COMPLETION_CODES: { key: "code", ... }` from the page's CONFIG. Every entry must be a
+// plain string literal, so the check sees exactly the codes the page will use.
+function completionCodes(html) {
+  const block = html.match(/COMPLETION_CODES:\s*\{([^}]*)\}/);
+  if (!block) throw new Error(`${ENTRY_HTML} has no CONFIG.COMPLETION_CODES block`);
+  const codes = {};
+  for (const line of block[1].split("\n")) {
+    const entry = line.replace(/\/\/.*$/, "").trim();
+    if (!entry) continue;
+    const m = entry.match(/^(\w+):\s*"([^"\\]*)",?$/);
+    if (!m) throw new Error(`cannot read completion code entry: ${entry}`);
+    codes[m[1]] = m[2];
+  }
+  if (!Object.keys(codes).length) throw new Error(`${ENTRY_HTML} lists no completion codes`);
+  return codes;
+}
+
+const codes = completionCodes(fs.readFileSync(path.join(REPO, ENTRY_HTML), "utf8"));
+const unpaid = Object.entries(codes)
+  .filter(([, code]) => !globalThis.Hawkins.isRealCode(code))
+  .map(([key, code]) => `${key} (${code === "" ? "empty" : `"${code}"`})`);
+if (unpaid.length && !ALLOW_PLACEHOLDER_CODES) {
+  console.error(
+    `refusing to build: these completion codes are empty or placeholders: ${unpaid.join(", ")}.\n` +
+      "Set real Prolific codes in CONFIG.COMPLETION_CODES, or pass --allow-placeholder-codes " +
+      "for a test build.",
+  );
+  process.exit(1);
+}
+if (unpaid.length) {
+  console.warn(`TEST BUILD: placeholder or empty completion codes: ${unpaid.join(", ")}`);
+}
+const TEST_BUILD_NOTE = unpaid.length
+  ? ` TEST BUILD (--allow-placeholder-codes): placeholder completion codes for ${unpaid.join(", ")}; not for paid participants.`
+  : "";
 
 // Study files that ship as JATOS assets (jatos.js is server-injected). The vendor/ files are
 // whatever scripts/vendor.mjs recorded in vendor/manifest.json.
@@ -183,7 +228,7 @@ function buildJas() {
         linearStudy: false,
         allowPreview: false,
         dirName: DIR_NAME,
-        comments: `Packaged by scripts/make-jzip.mjs. Batch caps: ${BATCH.maxTotalWorkers} total workers, ${BATCH.maxActiveMembers} active members per group.`,
+        comments: `Packaged by scripts/make-jzip.mjs. Batch caps: ${BATCH.maxTotalWorkers} total workers, ${BATCH.maxActiveMembers} active members per group.${TEST_BUILD_NOTE}`,
         componentList: [
           {
             uuid: crypto.randomUUID(),
