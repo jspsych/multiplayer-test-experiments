@@ -3,6 +3,12 @@
 This branch is disposable test tooling and evidence, never intended for merging.
 The experiment and archive are unchanged. Do not open a merge-targeted PR.
 
+**Continuation authorized:** after reviewing the initial failures, the user asked
+to continue measuring MindProbe despite DataPipe failures. The initial stopping
+decision below is historical. The 25/50/100 progression now uses observation mode,
+as described in the continuation section. Failures remain failures in the report;
+permitting the next stage does not make an unsuccessful stage pass.
+
 ## Reader overview
 
 This test asks whether the current Hawkins reference-game study can support 100
@@ -10,16 +16,21 @@ simultaneous pairs (200 participants) through its real hosted participant link.
 It is an end-to-end pipeline test, not a benchmark of bare JATOS software.
 
 The 1- and 2-pair checks passed. Two 10-pair attempts exposed final-upload failures
-and, on the repeat, a dyad that failed before gameplay. We stopped at that point.
-The evidence does **not** show that JATOS is limited to ten pairs, nor that every
-failed save acknowledgement means data was lost. No real participants were recruited.
+and, on the repeat, a dyad that failed before gameplay. After the user authorized
+continuing despite those failures, **25 pairs completed all gameplay and all 50
+clients received final JATOS result-write acknowledgements**. DataPipe still failed
+for 46 of those clients. Three attempts at 50 pairs were interrupted by runner
+resource limits; the last launched 100 clients and observed peak gameplay concurrency
+of 70 clients, but did not complete the cohort. The 100-pair stage was not started.
+No real participants were recruited. These results do **not** establish MindProbe's
+maximum concurrency, and failed acknowledgements alone do not prove data loss.
 
 The systems have different responsibilities:
 
 | System | Responsibility in this test | What was observed |
 | --- | --- | --- |
-| Playwright / local Chrome | Simulates participants and collects browser evidence | No sustained resource-stop trigger; first runner had an interruption flaw, disclosed below |
-| MindProbe / JATOS | Hosts the experiment, groups participants, transports multiplayer state, stores JATOS results | Twenty clients played simultaneously in the first 10-pair run; a later dyad failed during preparation/role assignment; no captured JATOS HTTP errors |
+| Playwright / local Chrome | Simulates participants and collects browser evidence | 25 pairs completed; larger attempts hit CPU/response limits; first runner had an interruption flaw, disclosed below |
+| MindProbe / JATOS | Hosts the experiment, groups participants, transports multiplayer state, stores JATOS results | Fifty clients completed simultaneous gameplay and final JATOS write acknowledgements; an earlier dyad failed during preparation/role assignment; no captured JATOS HTTP errors |
 | Study / multiplayer adapter and plugins | Coordinates preparation, assigns director/matcher roles, manages trials and exit routes | One dyad took inconsistent preparation/role paths; cause unproven |
 | DataPipe (`pipe.jspsych.org`) | Stages trial data and handles the separate final upload to the configured test destination | Repeated final-upload errors; one explicit metadata contention response |
 | Storage provider / result dashboards | Holds independently inspectable persisted results | Not read back during this test; JATOS exports and DataPipe/storage checks remain necessary |
@@ -270,7 +281,7 @@ Saved outcome properties are attached to all rows by the page's final
 not mean that trial itself exited early; inspect the row-specific `value` and the
 terminal row when reconstructing this sequence.
 
-### Disposition and next checks
+### Initial disposition and next checks (before the authorized continuation)
 
 The authorized progression stopped on reproduced failures. No 25-, 50-, or 100-pair
 run was started. This result establishes problems in the tested integrated pipeline,
@@ -289,12 +300,12 @@ do-not-merge branch; experiment source and `test.jzip` were not changed.
 
 ### Evidence access and interpretation
 
-The four run-directory names in the generated section identify independent runs;
+The distinct run-directory names in the generated section identify independent runs;
 the two 10-pair rows are separate attempts, not a single 20-pair test. All directory
 timestamps use UTC (the tests occurred on the evening of October 14 in Indiana).
-There were 46 synthetic participant starts across all four attempts. Retained
+There were 46 synthetic participant starts across the initial four attempts. Retained
 client datasets show 44 gameplay completions; the two remaining clients are the
-no-match dyad. Across all starts, 25 clients confirmed saving, ten showed failed
+no-match dyad. Across those initial 46 starts, 25 clients confirmed saving, ten showed failed
 final-save acknowledgements, and eleven had saving interrupted by the initial
 runner. The latter eleven must not be counted as demonstrated service failures.
 
@@ -339,23 +350,196 @@ rounds use short scripted messages with 3–5 seconds before description/selecti
 plus normal experiment feedback. This is a short active-workload check, not a
 full human-duration soak or a geographically distributed browser/network sample.
 
+## Continued observation: 25, 50, 100 pairs
+
+The user authorized continuing on the unchanged hosted study to distinguish
+MindProbe/JATOS behavior from the separate DataPipe problems. DataPipe stays
+enabled; this is not a JATOS-only deployment and cannot isolate every interaction
+between browser saving, the study code and both services.
+
+Set `LOAD_MODE=observe` and `LOAD_STAGES=25,50,100` before running the stage driver.
+Individual DataPipe, role-assignment and gameplay failures are counted, not used
+as automatic escalation gates. `summary.pass` still records strict end-to-end
+success. `summary.progressionAllowed` is the independent operational gate for
+observation mode; a zero process exit code in this mode is **not** a claim that
+all clients succeeded.
+
+Sustained runner resource pressure still stops the run. A widespread initial
+connection failure or JATOS HTTP 5xx pattern (at least five affected clients and
+at least 25% of launched clients) stops new arrivals and later escalation, while
+already-started clients are allowed to finish unless resource pressure requires
+termination. The per-client deadline remains 15 minutes.
+
+The continued runner captures all non-GET write response statuses, including PUT,
+so successful JATOS result-write acknowledgements can be counted separately from
+DataPipe and the combined terminal message. These are network acknowledgements,
+not administrative readback of stored records. It also retains the exact runner
+source in each new local run directory. Historical runs were not retroactively
+reclassified as passes.
+
+The 25-pair continuation uses the earlier 200 ms arrival spacing. At 50 and 100
+pairs, arrivals are spaced 500 ms apart to reduce simultaneous local browser
+startup pressure (`ARRIVAL_MS` can override this). Actual peak gameplay concurrency
+is measured independently. These are paced-arrival tests, not an instantaneous
+200-browser startup burst. The study's own round deadlines and saving remain unchanged.
+
+### 25-pair continuation results
+
+Run `load-2026-10-15T02-38-24-602Z-25pairs` completed in 332.0 seconds. All 50
+participants completed all 20 correct rounds, with matched within-dyad schedules,
+complementary roles, no saved coordination failures, and consistent saved dyad IDs.
+The runner observed 50 gameplay clients simultaneously. All 50 terminal clients
+had a final HTTP 200 acknowledgement from JATOS's `PUT .../resultData` endpoint,
+with no captured failed result-write requests. No JATOS HTTP errors or uncaught
+JavaScript exceptions were captured. This is positive evidence for 25 concurrent
+dyads under this workload, subject to the remaining server-readback limitation.
+
+Four final DataPipe uploads returned 201/accepted save results; 46 failed with
+`net::ERR_FAILED` and the extension's `status: 0`. Therefore only four clients saw
+the combined success message. These DataPipe failures did not prevent gameplay
+completion or the observed final JATOS write acknowledgements. They remain a
+material problem for the integrated paid-run saving pipeline.
+
+Available memory stayed above 11.68 GiB. Host CPU reached 100% in two startup
+samples but settled before the three-sample resource-stop threshold; maximum
+sampled Node timer delay was 106 ms. Later spikes also did not trigger a stop.
+
+### First 50-pair attempt: runner-limited, not a MindProbe capacity finding
+
+Run `load-2026-10-15T02-44-21-930Z-50pairs` used 500 ms requested arrival spacing.
+After 69 of 100 intended participants launched, the runner stopped at approximately
+41 seconds because three consecutive host CPU samples were 100%. It retained data
+and closed those clients; cleanup ended at 58.8 seconds. Peak observed gameplay
+clients was 30. No client completed the full game or reached final saving before
+the stop. All 69 interruption outcomes are runner-induced, not 69 service failures.
+
+Memory remained above 11.86 GiB and maximum sampled Node timer delay was 667 ms.
+No HTTP failure against JATOS or DataPipe and no uncaught JavaScript exception was
+recorded. This attempt did not establish 50 simultaneous pairs and cannot be used
+to infer MindProbe's maximum capacity or a participant dropout rate.
+
+A 50-pair retry uses 1,000 ms arrivals to distinguish startup pressure from
+steady gameplay load. The 100-pair stage will follow only if that runner remains
+stable. These pacing changes are explicit test conditions, not fixes to the study.
+
+The first slower retry (`load-2026-10-15T02-49-25-852Z-50pairs`) also stopped under
+the CPU-only guard: 59 launched clients, peak gameplay clients 38, zero full
+completions, zero captured HTTP errors, minimum free memory 14.77 GiB, and maximum
+Node timer delay only 102 ms. CPU samples reached 98.5%, 100%, 100% while arrivals
+were still ramping. These 59 interruptions are again runner-induced.
+
+Because CPU utilization alone does not show that browser actions are stalled,
+the continued observation-mode guard was refined before another retry. It still
+stops after three samples of less than 2 GiB available memory or more than five
+seconds of Node timer delay. For CPU saturation, it now requires **both** host CPU
+above 95% and browser-evaluation p95 above two seconds for three samples. Browser
+evaluation latency includes the ongoing wait for an in-flight page evaluation.
+CPU saturation without that responsiveness degradation is recorded as a limitation,
+not a service failure or automatic stop. Strict mode retains the earlier CPU-only
+threshold. The report preserves the two earlier aborted attempts as such.
+
+### Refined-guard 50-pair retry: browser responsiveness limit reproduced
+
+Run `load-2026-10-15T02-51-35-395Z-50pairs` launched all 100 intended clients using
+1,000 ms requested arrivals. The ramp took approximately two minutes under CPU
+contention. Peak observed gameplay clients was 70; this is **not** evidence that
+all 50 pairs played simultaneously. No client completed the full game before
+termination. The cohort was not allowed to advance to 100 pairs.
+
+The monitor sampled CPU at 100% with browser-evaluation p95 values of 2,052 ms at
+101 seconds, 2,263 ms at 112 seconds, and 5,665 ms at 123 seconds. The third
+degraded sample triggered the revised guard. Maximum sampled Node timer delay
+was 1,372 ms, and memory remained above 10.93 GiB. Browser operations also timed
+out while interacting with existing, visible, enabled tangram elements; these
+are automation/renderer responsiveness failures under saturated runner load,
+not evidence that the JATOS server rejected the selection.
+
+The initial trigger and subsequent context teardown contaminate any partner-left,
+partial-game or missing-final-save observations from this cohort. All raw snapshots
+are retained, but no service dropout rate or completion rate should be inferred
+from these interrupted attempts. No HTTP errors against JATOS or DataPipe and no
+uncaught page JavaScript exceptions were captured. Cleanup finished at 146.8 seconds.
+
+Of the 100 client outcomes, 88 are `Stage stopped` and twelve are Playwright click
+timeouts. Only 45 distinct dyad IDs were observed before teardown; launching 100
+browser clients does not prove that all 100 completed connecting or pairing.
+The source used for this retry still included last evaluation readings from closed
+clients in the responsiveness percentile; the current runner excludes them. This
+can inflate late resource samples and is another reason not to turn this guard
+trigger into a precise browser-capacity threshold. The twelve actual click
+timeouts remain independent evidence of automation difficulty under this load.
+
+### Current conclusion and route to the 100-pair target
+
+Under the completed short scripted workload, MindProbe/JATOS supported 25 concurrent
+dyads through gameplay and final result-write acknowledgements. This remains
+client/network evidence, pending independent JATOS result-store readback. The
+DataPipe failures are a separate observed problem in the unchanged integrated study.
+
+This machine did not produce a valid completed 50-pair or 100-pair test. Repeated
+local CPU saturation and browser delays limit what the larger attempts can say
+about the server. Repeating those attempts unchanged would mostly retest the same
+load-generator limitation.
+
+The next useful setup is a larger load generator or several coordinated browser
+workers (for example, four machines each generating 25 pairs). All workers should
+use the same dedicated batch, overlap their gameplay windows, retain unique
+synthetic participant IDs, and combine evidence by `multiplayer_session_id`.
+The server may pair participants across machines: this runner's chat-driven agents
+can communicate that way, but its current per-process dyad validation assumes both
+partners' datasets are local. A distributed extension must merge datasets and
+validate dyads across workers before reporting success. Do not add per-worker
+peak counts as if they prove simultaneous aggregate concurrency without checking
+the overlapping time windows.
+
+No cloud instances, external paid resources, administrative changes, alternate
+study deployment, or 100-pair run were created. The code and full findings remain
+confined to `test/mindprobe-load-do-not-merge`.
+
 ## Executed stages (generated from local artifacts)
 
-| Pairs | Gameplay completed | Confirmed saves | Peak gameplay clients | Duration (s) | Group ID observed p95 (ms) | Min free GiB | Peak CPU % | HTTP / JS errors | Result |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 2/2 | 2/2 | not sampled | 233.1 | not sampled | not sampled | not sampled | 0 / 0 | PASS (client evidence) |
-| 2 | 4/4 | 4/4 | not sampled | 281.9 | 3006 | 15.96 | 40.5 | 0 / 0 | PASS (client evidence) |
-| 10 | 20/20 | 8/20 | 20 | 284.3 | 3708 | 13.52 | 71.1 | 2 / 0 | STOP / investigate |
-| 10 | 18/20 | 11/20 | 18 | 326.1 | 5031 | 16.94 | 72.9 | 9 / 0 | STOP / investigate |
+| Intended pairs | Launched / intended clients | Gameplay completed | JATOS final write acks | Combined saves | Peak gameplay clients | Duration (s) | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2/2 | 2/2 | not sampled | 2/2 | not sampled | 233.1 | PASS (client evidence) |
+| 2 | 4/4 | 4/4 | not sampled | 4/4 | not sampled | 281.9 | PASS (client evidence) |
+| 10 | 20/20 | 20/20 | not sampled | 8/20 | 20 | 284.3 | STOP / investigate |
+| 10 | 20/20 | 18/20 | not sampled | 11/20 | 18 | 326.1 | STOP / investigate |
+| 25 | 50/50 | 50/50 | 50/50 | 4/50 | 50 | 332.0 | OBSERVED; failures retained |
+| 50 | 69/100 | 0/69 | 0/69 | 0/69 | 30 | 58.8 | RUNNER RESOURCE STOP |
+| 50 | 59/100 | 0/59 | 0/59 | 0/59 | 38 | 70.8 | RUNNER RESOURCE STOP |
+| 50 | 100/100 | 0/100 | 0/100 | 0/100 | 70 | 146.8 | RUNNER RESOURCE STOP |
 
 - `load-2026-10-15T02-07-41-604Z-1pairs`: summary SHA-256 `a3f90041789b3b75138657894168b69d56e62dbfdac0acb11faec229464afb83`; runner SHA-256 `not recorded in first run`; source commit `aeae8ea20777d80f269fbad0104fa3d47dee5a59`.
+  Mode strict, arrivals 200 ms; group-ID observation p95 not sampled ms; min free memory not sampled GiB; peak host CPU not sampled%; captured JATOS / DataPipe / uncaught JS errors 0 / 0 / 0.
 - `load-2026-10-15T02-12-53-402Z-2pairs`: summary SHA-256 `bc5d66da1a8e0b03a94a25f541f7ef652bda9012cd9636ee8cbd056f3edae5cd`; runner SHA-256 `de59da01da4d5517426a31fde5b456cf6595a16e771396fb9b8c685729895adb`; source commit `aeae8ea20777d80f269fbad0104fa3d47dee5a59`.
+  Mode strict, arrivals 200 ms; group-ID observation p95 3006 ms; min free memory 15.96 GiB; peak host CPU 40.5%; captured JATOS / DataPipe / uncaught JS errors 0 / 0 / 0.
   jatos.mindprobe.eu: 114 completed non-GET requests; p95 duration 284.9 ms (mixed endpoints, not message delivery latency).
   pipe.jspsych.org: 8 completed non-GET requests; p95 duration 26539.7 ms (mixed endpoints, not message delivery latency).
 - `load-2026-10-15T02-17-55-809Z-10pairs`: summary SHA-256 `4816a191529283ad2590402a82cf07821b2211aafd40c45714383cd125e8c83e`; runner SHA-256 `fb09ab53790f7d12c7d0372b09711a6ebbfc060582c28f518359f0d902965bf1`; source commit `9c677b204dd141b043d67d9fa83c451464049663`.
+  Mode strict, arrivals 200 ms; group-ID observation p95 3708 ms; min free memory 13.52 GiB; peak host CPU 71.1%; captured JATOS / DataPipe / uncaught JS errors 0 / 2 / 0.
   jatos.mindprobe.eu: 567 completed non-GET requests; p95 duration 287.7 ms (mixed endpoints, not message delivery latency).
   pipe.jspsych.org: 29 completed non-GET requests; p95 duration 48101.0 ms (mixed endpoints, not message delivery latency).
 - `load-2026-10-15T02-24-06-277Z-10pairs`: summary SHA-256 `56caf81c4bed834e5d883e2ed099820e5ab3d80d1bdb12e9f1cffe56f08eda1f`; runner SHA-256 `69f64c62b8ab975126c40d5d344244d0d10ee391946baffbb989af099e5cb3a7`; source commit `9c677b204dd141b043d67d9fa83c451464049663`.
-  Additional audit findings: [{"participant":1,"issue":"round counts"},{"participant":6,"issue":"round counts"}].
+  Mode strict, arrivals 200 ms; group-ID observation p95 5031 ms; min free memory 16.94 GiB; peak host CPU 72.9%; captured JATOS / DataPipe / uncaught JS errors 0 / 9 / 0.
+  Additional audit findings by issue: {"round counts":2}.
   jatos.mindprobe.eu: 533 completed non-GET requests; p95 duration 281.7 ms (mixed endpoints, not message delivery latency).
   pipe.jspsych.org: 32 completed non-GET requests; p95 duration 56641.3 ms (mixed endpoints, not message delivery latency).
+- `load-2026-10-15T02-38-24-602Z-25pairs`: summary SHA-256 `24a7012efb6f5be21ff526b9ee0c32cdb9722a33ec85d1c08e1d80300ded5af3`; runner SHA-256 `4564279597503cdb09eda3e1fbd48e4e14fb7154292f829c6b5f8c88954414c3`; source commit `0f1b76959feac949eec7279faf69f5f23ba4eaec`.
+  Mode observe, arrivals 200 ms; group-ID observation p95 8850 ms; min free memory 11.68 GiB; peak host CPU 100%; captured JATOS / DataPipe / uncaught JS errors 0 / 46 / 0.
+  jatos.mindprobe.eu: 1459 completed non-GET requests; p95 duration 302.2 ms (mixed endpoints, not message delivery latency).
+  pipe.jspsych.org: 54 completed non-GET requests; p95 duration 20159.4 ms (mixed endpoints, not message delivery latency).
+- `load-2026-10-15T02-44-21-930Z-50pairs`: summary SHA-256 `f2d6f270cc7cf7ef6e734bf229f81a4260ab69a0fa36119ca31a461f6b33fb23`; runner SHA-256 `20a4db357176942f0b6e3136486d684979685d805198c81d4ca62f8d88af2c46`; source commit `0f1b76959feac949eec7279faf69f5f23ba4eaec`.
+  Mode observe, arrivals 500 ms; group-ID observation p95 15532 ms; min free memory 11.86 GiB; peak host CPU 100%; captured JATOS / DataPipe / uncaught JS errors 0 / 0 / 0.
+  Additional audit findings by issue: {"round counts":69,"dyad identifier":21}. This run was interrupted by the runner; incomplete round counts are not service failures.
+  jatos.mindprobe.eu: 150 completed non-GET requests; p95 duration 458.0 ms (mixed endpoints, not message delivery latency).
+  pipe.jspsych.org: 68 completed non-GET requests; p95 duration 1651.4 ms (mixed endpoints, not message delivery latency).
+- `load-2026-10-15T02-49-25-852Z-50pairs`: summary SHA-256 `54e83328cb229f0cd03ba73202862d517ad098a010129699bc6517ee8aeb3f9c`; runner SHA-256 `20a4db357176942f0b6e3136486d684979685d805198c81d4ca62f8d88af2c46`; source commit `0f1b76959feac949eec7279faf69f5f23ba4eaec`.
+  Mode observe, arrivals 1000 ms; group-ID observation p95 6156 ms; min free memory 14.77 GiB; peak host CPU 100%; captured JATOS / DataPipe / uncaught JS errors 0 / 0 / 0.
+  Additional audit findings by issue: {"round counts":59,"dyad identifier":6}. This run was interrupted by the runner; incomplete round counts are not service failures.
+  jatos.mindprobe.eu: 235 completed non-GET requests; p95 duration 216.2 ms (mixed endpoints, not message delivery latency).
+  pipe.jspsych.org: 59 completed non-GET requests; p95 duration 724.2 ms (mixed endpoints, not message delivery latency).
+- `load-2026-10-15T02-51-35-395Z-50pairs`: summary SHA-256 `cac06997b29feaea61d9b837a3070bf53a9e9b13a5663de80b72889c0fa129b5`; runner SHA-256 `8d31bb499a3225a5bdd61d86243005acf55215f812263cf8d27ff6d737ff86f2`; source commit `0f1b76959feac949eec7279faf69f5f23ba4eaec`.
+  Mode observe, arrivals 1000 ms; group-ID observation p95 12024 ms; min free memory 10.93 GiB; peak host CPU 100%; captured JATOS / DataPipe / uncaught JS errors 0 / 0 / 0.
+  Additional audit findings by issue: {"round counts":100,"dyad identifier":10}. This run was interrupted by the runner; incomplete round counts are not service failures.
+  jatos.mindprobe.eu: 546 completed non-GET requests; p95 duration 230.8 ms (mixed endpoints, not message delivery latency).
+  pipe.jspsych.org: 100 completed non-GET requests; p95 duration 800.8 ms (mixed endpoints, not message delivery latency).

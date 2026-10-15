@@ -3,8 +3,8 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 const folders = (await readdir('.build')).filter(n => /^load-.*pairs$/.test(n)).sort();
 const lines = ['## Executed stages (generated from local artifacts)', '',
-  '| Pairs | Gameplay completed | Confirmed saves | Peak gameplay clients | Duration (s) | Group ID observed p95 (ms) | Min free GiB | Peak CPU % | HTTP / JS errors | Result |',
-  '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
+  '| Intended pairs | Launched / intended clients | Gameplay completed | JATOS final write acks | Combined saves | Peak gameplay clients | Duration (s) | Result |',
+  '| --- | --- | --- | --- | --- | --- | --- | --- |'];
 const evidence = [];
 for (const folder of folders) {
   const base = `.build/${folder}`;
@@ -26,9 +26,19 @@ for (const folder of folders) {
   const passed = s.pass && !invalid.length;
   const gameplay = participants.filter(p => (p.rows ?? []).filter(r => r.trial_type === 'multiplayer-reference-game').length === 20).length;
   const saves = participants.filter(p => p.terminal === 'Your responses have been saved.').length;
-  lines.push(`| ${s.pairs} | ${gameplay}/${s.pairs * 2} | ${saves}/${s.pairs * 2} | ${s.peakActiveGameplay ?? 'not sampled'} | ${(s.elapsedMs / 1000).toFixed(1)} | ${s.pairingMs?.p95 ?? 'not sampled'} | ${minMemory ?? 'not sampled'} | ${maxCPU ?? 'not sampled'} | ${s.httpFailureCount} / ${s.jsErrorCount} | ${passed ? 'PASS (client evidence)' : 'STOP / investigate'} |`);
+  const http = participants.flatMap(p => p.httpFailures);
+  const jatosErrors = http.filter(f => f.host === 'jatos.mindprobe.eu' || f.url?.startsWith('https://jatos.mindprobe.eu/')).length;
+  const pipeErrors = http.filter(f => f.host === 'pipe.jspsych.org' || f.url?.startsWith('https://pipe.jspsych.org/')).length;
+  const jatosAcks = participants.some(p => p.writes) ? participants.filter(p => p.terminal &&
+    p.writes?.filter(w => w.host === 'jatos.mindprobe.eu' && w.path.endsWith('/resultData')).at(-1)?.status === 200 &&
+    !p.httpFailures.some(f => (f.host === 'jatos.mindprobe.eu' || f.url?.startsWith('https://jatos.mindprobe.eu/')) && (f.path ?? f.url ?? '').includes('/resultData'))).length : null;
+  lines.push(`| ${s.pairs} | ${s.launched}/${s.pairs * 2} | ${gameplay}/${s.launched} | ${jatosAcks == null ? 'not sampled' : `${jatosAcks}/${s.launched}`} | ${saves}/${s.launched} | ${s.peakActiveGameplay ?? 'not sampled'} | ${(s.elapsedMs / 1000).toFixed(1)} | ${passed ? 'PASS (client evidence)' : s.resourceStopped ? 'RUNNER RESOURCE STOP' : s.mode === 'observe' && s.progressionAllowed ? 'OBSERVED; failures retained' : 'STOP / investigate'} |`);
   evidence.push(`- \`${folder}\`: summary SHA-256 \`${createHash('sha256').update(raw).digest('hex')}\`; runner SHA-256 \`${s.runnerSha256 ?? 'not recorded in first run'}\`; source commit \`${s.sourceCommit}\`.`);
-  if (invalid.length) evidence.push(`  Additional audit findings: ${JSON.stringify(invalid)}.`);
+  evidence.push(`  Mode ${s.mode ?? 'strict'}, arrivals ${s.arrivalMs ?? 200} ms; group-ID observation p95 ${s.pairingMs?.p95 ?? 'not sampled'} ms; min free memory ${minMemory ?? 'not sampled'} GiB; peak host CPU ${maxCPU ?? 'not sampled'}%; captured JATOS / DataPipe / uncaught JS errors ${jatosErrors} / ${pipeErrors} / ${s.jsErrorCount}.`);
+  if (invalid.length) {
+    const counts = Object.fromEntries([...new Set(invalid.map(f => f.issue))].map(issue => [issue, invalid.filter(f => f.issue === issue).length]));
+    evidence.push(`  Additional audit findings by issue: ${JSON.stringify(counts)}.${s.resourceStopped ? ' This run was interrupted by the runner; incomplete round counts are not service failures.' : ''}`);
+  }
   const hosts = [...new Set(participants.flatMap(p => (p.requestDurations ?? []).map(r => r.host)))];
   for (const host of hosts) {
     const times = participants.flatMap(p => p.requestDurations ?? []).filter(r => r.host === host && r.method !== 'GET').map(r => r.ms).sort((a, b) => a - b);

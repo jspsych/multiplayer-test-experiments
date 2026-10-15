@@ -7,6 +7,9 @@ import { execFileSync } from 'node:child_process';
 
 const url = process.env.STUDY_URL;
 const pairs = Number(process.env.PAIRS ?? 1);
+const observe = process.env.LOAD_MODE === 'observe';
+const arrivalMs = Number(process.env.ARRIVAL_MS ?? (observe && pairs >= 50 ? 500 : 200));
+if (!Number.isFinite(arrivalMs) || arrivalMs < 100 || arrivalMs > 1000) throw Error('ARRIVAL_MS must be 100..1000');
 if (!url || new URL(url).hostname !== 'jatos.mindprobe.eu') throw Error('Set STUDY_URL to the authorized MindProbe link');
 if (!Number.isInteger(pairs) || pairs < 1 || pairs > 100) throw Error('PAIRS must be 1..100');
 const run = `load-${new Date().toISOString().replaceAll(/[:.]/g, '-')}-${pairs}pairs`;
@@ -17,15 +20,18 @@ const started = Date.now();
 const records = [];
 const browsers = [];
 let peakActiveGameplay = 0;
-const metadata = { run, pairs, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+const metadata = { run, pairs, mode: observe ? 'observe' : 'strict', arrivalMs, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   runnerSha256: (await import('node:crypto')).createHash('sha256').update(await (await import('node:fs/promises')).readFile(import.meta.filename)).digest('hex'),
   playwrightVersion: JSON.parse(await (await import('node:fs/promises')).readFile(new URL('../.build/load-tools/node_modules/playwright/package.json', import.meta.url))).version,
   started: new Date().toISOString(), cpuCount: os.cpus().length, totalMemory: os.totalmem(),
   note: 'Real UI, real JATOS and configured DataPipe. Synthetic Prolific IDs. Client save acknowledgements are not server readback.' };
 await writeFile(resolve(out, 'metadata.json'), JSON.stringify(metadata, null, 2));
+await writeFile(resolve(out, 'runner-source.mjs'), await (await import('node:fs/promises')).readFile(import.meta.filename));
 const event = async data => appendFile(resolve(out, 'events.jsonl'), JSON.stringify({ elapsedMs: Date.now() - started, ...data }) + '\n');
 let stopping = false;
 let stopLaunching = false;
+let widespreadConnectionFailure = false;
+const isJatosFailure = failure => failure.host === 'jatos.mindprobe.eu' || failure.url?.startsWith('https://jatos.mindprobe.eu/');
 let previousCPU = os.cpus().map(c => c.times).reduce((a, t) => ({ idle: a.idle + t.idle, total: a.total + Object.values(t).reduce((s, x) => s + x, 0) }), { idle: 0, total: 0 });
 let previousTick = Date.now();
 let pressureTicks = 0;
@@ -37,12 +43,23 @@ const monitor = setInterval(() => {
     freeMemoryGB: +(os.freemem() / 2 ** 30).toFixed(2), cpuBusyPercent: +(100 * (1 - (cpu.idle - previousCPU.idle) / (cpu.total - previousCPU.total))).toFixed(1),
     eventLoopDelayMs: Math.max(0, Date.now() - previousTick - 10000) };
   previousCPU = cpu; previousTick = Date.now(); resources.push(sample);
-  pressureTicks = sample.freeMemoryGB < 2 || sample.eventLoopDelayMs > 5000 || sample.cpuBusyPercent > 95 ? pressureTicks + 1 : 0;
+  const evalTimes = records.filter(r => !r.closed).map(r => Math.max(r.lastEvalMs ?? 0, r.evalStartedAt ? Date.now() - r.evalStartedAt : 0)).sort((a, b) => a - b);
+  sample.browserEvalP95Ms = evalTimes[Math.min(evalTimes.length - 1, Math.floor(evalTimes.length * .95))] ?? 0;
+  // In observation mode CPU saturation alone is evidence, not a stop condition.
+  // Require persistent responsiveness degradation as well; always retain memory/Node-stall stops.
+  const cpuPressure = sample.cpuBusyPercent > 95 && (!observe || sample.browserEvalP95Ms > 2000);
+  pressureTicks = sample.freeMemoryGB < 2 || sample.eventLoopDelayMs > 5000 || cpuPressure ? pressureTicks + 1 : 0;
   if (pressureTicks >= 3) { stopping = true; sample.stoppedForResourcePressure = true; }
+  const connectionFailures = records.filter(r => r.failure && !r.dyad).length;
+  const serverFailureClients = records.filter(r => r.httpFailures.some(f => isJatosFailure(f) && f.status >= 500)).length;
+  if ((connectionFailures >= 5 && connectionFailures / records.length >= .25) || (serverFailureClients >= 5 && serverFailureClients / records.length >= .25)) {
+    widespreadConnectionFailure = true; stopLaunching = true;
+  }
+  sample.activeGameplay = records.filter(r => !r.done && !r.failure && r.lastState?.game).length;
   console.log(JSON.stringify(sample));
 }, 10000);
 async function participant(browser, index) {
-  const record = { index, syntheticId: `${run}-${index}`, errors: [], consoleErrors: [], httpFailures: [], uploads: [], done: false };
+  const record = { index, syntheticId: `${run}-${index}`, errors: [], consoleErrors: [], httpFailures: [], uploads: [], writes: [], done: false };
   records.push(record);
   let context, page;
   const responseReads = [];
@@ -60,11 +77,12 @@ async function participant(browser, index) {
         responseReads.push(response.text().then(body => { failure.body = body.slice(0, 3000); }).catch(e => { failure.bodyReadError = String(e); }));
       }
       if (response.request().method() === 'POST') record.uploads.push({ host: u.host, path: u.pathname, status: response.status(), elapsedMs: Date.now() - started });
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(response.request().method())) record.writes.push({ host: u.host, path: u.pathname, method: response.request().method(), status: response.status(), elapsedMs: Date.now() - started });
     });
     page.on('requestfailed', request => record.httpFailures.push({ url: request.url().split('?')[0], error: request.failure()?.errorText }));
     page.on('requestfinished', request => {
       const timing = request.timing();
-      if (timing.responseEnd >= 0) record.requestDurations.push({ host: new URL(request.url()).host, method: request.method(), ms: timing.responseEnd });
+      if (timing.responseEnd >= 0) record.requestDurations.push({ host: new URL(request.url()).host, path: new URL(request.url()).pathname, method: request.method(), ms: timing.responseEnd });
     });
     const entry = new URL(url);
     entry.searchParams.set('PROLIFIC_PID', record.syntheticId);
@@ -74,6 +92,7 @@ async function participant(browser, index) {
     await page.goto(entry.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
     let lastRound, actedAt = 0, described = false, selected = false;
     while (!stopping && Date.now() - entered < 15 * 60000) {
+      record.evalStartedAt = Date.now();
       const state = await page.evaluate(() => {
         const answers = ['1', '2', '0'];
         for (const [i, name] of ['target_visibility', 'click_gate', 'layout'].entries()) {
@@ -95,11 +114,14 @@ async function participant(browser, index) {
           terminal: document.querySelector('#save-status')?.textContent,
           text: document.body?.innerText?.slice(0, 1200) };
       });
+      record.lastEvalMs = Date.now() - record.evalStartedAt;
+      record.evalStartedAt = null;
       if (state.dyad && !record.dyad) { record.dyad = state.dyad; record.pairedMs = Date.now() - entered; await event({ index, type: 'paired', dyad: state.dyad, pairedMs: record.pairedMs }); }
       if (state.terminal) {
         record.terminal = state.terminal;
         record.rows = await page.evaluate(() => jsPsych.data.get().values());
         record.done = record.rows.at(-1)?.ended_reason === 'complete';
+        record.pipeSaveResult = await page.evaluate(() => typeof pipeSaveResult !== 'undefined' ? pipeSaveResult : null);
         if (!record.done || !state.terminal.includes('Your responses have been saved.')) record.failure = 'Incomplete session or unconfirmed save';
         break;
       }
@@ -136,8 +158,9 @@ async function participant(browser, index) {
     }
     await Promise.race([Promise.allSettled(responseReads), sleep(5000)]);
     await writeFile(resolve(out, `participant-${index}.json`), JSON.stringify(record, null, 2));
-    // Failure prevents new arrivals/escalation, but already-started partners may finish and save.
-    if (record.failure) stopLaunching = true;
+    // Observation mode measures failure rates without treating individual failures as a capacity ceiling.
+    if (record.failure && !observe) stopLaunching = true;
+    record.closed = true;
     await context?.close().catch(() => {});
   }
 }
@@ -149,7 +172,7 @@ try {
   const jobs = [];
   for (let i = 0; i < pairs * 2 && !stopping && !stopLaunching; i++) {
     jobs.push(participant(browsers[Math.floor(i / 20)], i));
-    await sleep(200);
+    await sleep(arrivalMs);
   }
   await Promise.allSettled(jobs);
 } finally {
@@ -174,10 +197,22 @@ try {
     pairingMs: { p50: percentile(records.map(r => r.pairedMs).filter(Number.isFinite), .5), p95: percentile(records.map(r => r.pairedMs).filter(Number.isFinite), .95) },
     postRequestMs: { p50: percentile(records.flatMap(r => r.requestDurations ?? []).filter(r => r.method === 'POST').map(r => r.ms), .5), p95: percentile(records.flatMap(r => r.requestDurations ?? []).filter(r => r.method === 'POST').map(r => r.ms), .95) } };
   summary.pass = summary.completed === pairs * 2 && !summary.failures.length && !problems.length && summary.dyadCount === pairs && !summary.httpFailureCount && !summary.jsErrorCount;
+  summary.dataPipeFailureCount = records.flatMap(r => r.httpFailures).filter(f => f.host === 'pipe.jspsych.org' || f.url?.startsWith('https://pipe.jspsych.org/')).length;
+  summary.jatosHttpFailureCount = records.flatMap(r => r.httpFailures).filter(isJatosFailure).length;
+  summary.confirmedCombinedSaves = records.filter(r => r.terminal === 'Your responses have been saved.').length;
+  summary.jatosFinalWriteAcknowledgements = records.filter(r => r.terminal &&
+    (r.writes.filter(w => w.host === 'jatos.mindprobe.eu' && w.path.endsWith('/resultData')).at(-1)?.status === 200) &&
+    !r.httpFailures.some(f => isJatosFailure(f) && (f.path ?? f.url ?? '').includes('/resultData'))).length;
+  summary.dataPipeFinalAccepted = records.filter(r => r.pipeSaveResult?.ok === true).length;
+  summary.terminalReasons = Object.fromEntries([...new Set(records.map(r => r.rows?.at(-1)?.ended_reason ?? 'no_terminal'))].map(reason => [reason, records.filter(r => (r.rows?.at(-1)?.ended_reason ?? 'no_terminal') === reason).length]));
+  summary.progressionAllowed = !stopping && !widespreadConnectionFailure && summary.launched === pairs * 2;
+  summary.widespreadConnectionFailure = widespreadConnectionFailure;
+  summary.resourceStopped = stopping;
   await writeFile(resolve(out, 'summary.json'), JSON.stringify(summary, null, 2));
-  console.log(JSON.stringify({ ...summary, resources: { samples: resources.length,
+  console.log(JSON.stringify({ ...summary, failures: { count: summary.failures.length, firstFive: summary.failures.slice(0, 5) },
+    problems: { count: summary.problems.length, firstFive: summary.problems.slice(0, 5) }, resources: { samples: resources.length,
     minFreeMemoryGB: Math.min(...resources.map(r => r.freeMemoryGB)),
     maxCpuBusyPercent: Math.max(...resources.map(r => r.cpuBusyPercent)),
     maxEventLoopDelayMs: Math.max(...resources.map(r => r.eventLoopDelayMs)) }, out }, null, 2));
-  if (!summary.pass) process.exitCode = 1;
+  if (observe ? !summary.progressionAllowed : !summary.pass) process.exitCode = 1;
 }
