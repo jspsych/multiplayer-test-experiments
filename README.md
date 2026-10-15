@@ -29,7 +29,7 @@ live, version, and be piloted independently.
 | --- | --- | --- |
 | Replicates | Hawkins, Frank & Goodman (2020) | Clark & Wilkes-Gibbs (1986) |
 | Condition | Sequential — single target, one click | Full-board — all 12 tangrams as an ordered target |
-| Schedule | 72 trials in the original; 18 trials (3 blocks ? 6 assigned targets) in the paid pilot | 6 trials, fresh full-board order each |
+| Schedule | 72 trials in the original; 18 trials (3 blocks × 6 assigned targets) in the paid pilot | 6 trials, fresh full-board order each |
 | Fidelity note | Near-exact, including Exp. 2's matcher-click gate (`require_message_before_response: true`) | Text chat substitutes for the original spoken dialogue — the one deliberate deviation, noted in-file |
 
 Both fix director/matcher for the whole game, reveal the target to the director only, and use
