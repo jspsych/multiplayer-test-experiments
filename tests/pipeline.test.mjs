@@ -1,249 +1,212 @@
-// DataPipe saving (Hawkins.createPipeline), run against a fake DataPipe.
-//
-// The fake keeps what was ATTEMPTED apart from what LANDED, because a failed POST leaves no file at
-// OSF. Mixing the two up hides exactly the data-loss bugs these tests are for.
-
+// Guard the paid pilot's single DataPipe save path, and run the page's real terminal screen against
+// saves that hang, fail, or succeed late: the exit message and the way to submit must never wait.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import "../hawkins.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
-const { createPipeline } = globalThis.Hawkins;
+const root = fileURLToPath(new URL("..", import.meta.url));
+const page = readFileSync(join(root, "reference-game-hawkins.html"), "utf8");
+const hawkins = readFileSync(join(root, "hawkins.js"), "utf8");
+const vendor = readFileSync(join(root, "scripts/vendor.mjs"), "utf8");
 
-function fakeDataPipe() {
-  const state = { responses: [], sent: [], landed: [] };
-  state.fetch = async (url, opts) => {
-    const body = JSON.parse(opts.body);
-    const rec = { filename: body.filename, ...JSON.parse(body.data) };
-    state.sent.push(rec);
-    const r = state.responses.shift() ?? { status: 201 };
-    if (r.delay) await new Promise((resolve) => setTimeout(resolve, r.delay));
-    if (r.throw) throw new Error("network down");
-    if (r.status === 201 || r.status === 202) state.landed.push(rec);
-    return {
-      status: r.status,
-      headers: { get: () => r.retryAfter ?? null },
-      json: async () => ({ error: r.error ?? null }),
-    };
-  };
-  return state;
-}
+const between = (from, to) => page.slice(page.indexOf(from), page.indexOf(to));
+const stateSource = between("    // ---- Session state", "    // ---- Timeline");
+const terminalSource = between("    // ---- Terminal screen", "    // ---- Connecting");
 
-function setup(overrides = {}) {
-  const dp = fakeDataPipe();
-  const env = { rows: [], outcome: null, sleeps: [] };
-  const pipeline = createPipeline({
-    experimentId: "abc123456789",
-    getRows: () => env.rows,
-    meta: () => ({
-      dyad_id: "dyad1",
-      participant_id: "p-7",
-      prolific_pid: "PROLIFIC123",
-      outcome: env.outcome,
-    }),
-    maxAttempts: 3,
-    baseBackoffMs: 1,
-    fetch: dp.fetch,
-    sleep: async (ms) => {
-      env.sleeps.push(ms);
+test("Hawkins registers one pinned Pipe extension and no competing DataPipe saver", () => {
+  assert.match(page, /src="vendor\/extension-pipe\.js"/);
+  assert.match(vendor, /PIPE_EXTENSION_VERSION = "0\.2\.0"/);
+  assert.equal((page.match(/type: jsPsychExtensionPipe/g) ?? []).length, 1);
+  assert.match(page, /enabled: datapipeEnabled,/);
+  assert.match(page, /format: "json"/);
+  assert.doesNotMatch(page + hawkins, /createPipeline|Pipeline\.save|api\/data\//);
+  // A top-level crypto.randomUUID() throws outside a secure context, before anything renders.
+  assert.doesNotMatch(page, /crypto\.randomUUID/);
+  // Nothing may hang off the extension's on_finish chain, which awaits the upload.
+  assert.doesNotMatch(page, /on_finish: showTerminalScreen/);
+});
+
+test("DataPipe is on only on JATOS or with an explicit ?datapipe=1 opt-in", () => {
+  const decl = page.slice(page.indexOf("    const datapipeEnabled ="), page.indexOf("    let resolvePipeSave"));
+  const enabled = ({ onJatos, search, id = "wE2Zlitn0uhu" }) =>
+    vm.runInNewContext(`${decl}; datapipeEnabled`, {
+      CONFIG: { DATAPIPE_EXPERIMENT_ID: id },
+      onJatos,
+      location: { search },
+      URLSearchParams,
+    });
+  assert.equal(enabled({ onJatos: false, search: "?mp_session=abc" }), false);
+  assert.equal(enabled({ onJatos: false, search: "?mp_session=abc&datapipe=0" }), false);
+  assert.equal(enabled({ onJatos: false, search: "?mp_session=abc&datapipe=1" }), true);
+  assert.equal(enabled({ onJatos: true, search: "" }), true);
+  assert.equal(enabled({ onJatos: true, search: "", id: "" }), false);
+});
+
+// A minimal DOM: the display element, the screen the page appends beside it, and lookups by id of
+// the elements written into that screen's markup.
+function fakeDom() {
+  const byId = new Map();
+  const attached = [];
+  const element = (id) => ({
+    id,
+    style: {},
+    textContent: "",
+    listeners: {},
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+    click() { this.listeners.click?.(); },
+  });
+  const display = { ...element("jspsych-content"), after: (el) => attached.push(el) };
+  const document = {
+    createElement: () => element(null),
+    getElementById(id) {
+      const host = attached.find((el) => el.innerHTML?.includes(`id="${id}"`));
+      if (!host) return null;
+      if (!byId.has(id)) {
+        const el = element(id);
+        el.textContent = host.innerHTML.match(new RegExp(`id="${id}"[^>]*>([^<]*)<`))?.[1] ?? "";
+        byId.set(id, el);
+      }
+      return byId.get(id);
     },
-    ...overrides,
-  });
-  return { dp, env, pipeline };
+  };
+  return { display, document, attached };
 }
 
-const rowIds = (chunks) => chunks.flatMap((c) => c.trials.map((t) => t.i));
-
-test("each chunk carries only the rows no earlier chunk sent", async () => {
-  const { dp, env, pipeline } = setup();
-  env.rows = [{ i: 0 }, { i: 1 }, { i: 2 }];
-  assert.equal((await pipeline.save("round-1")).ok, true);
-  env.rows.push({ i: 3 }, { i: 4 });
-  await pipeline.save("round-2");
-  assert.deepEqual(dp.sent[0].row_ranges, [[0, 2]]);
-  assert.deepEqual(dp.sent[1].row_ranges, [[3, 4]]);
-  assert.equal(dp.sent[1].chunk_seq, 1);
-  const r = await pipeline.save("nothing-new");
-  assert.equal(dp.sent.length, 2);
-  assert.equal(r.empty, true);
-});
-
-test("202 counts as saved and is not retried", async () => {
-  const { dp, env, pipeline } = setup();
-  dp.responses = [{ status: 202 }];
-  env.rows = [{ i: 0 }];
-  assert.equal((await pipeline.save("r")).ok, true);
-  assert.equal(dp.sent.length, 1);
-});
-
-test("a terminal 4xx is not retried, and its rows go out with the next save", async () => {
-  const { dp, env, pipeline } = setup();
-  dp.responses = [{ status: 400, error: "SESSION_LIMIT_REACHED" }];
-  env.rows = [{ i: 0 }];
-  assert.equal((await pipeline.save("r1")).ok, false);
-  assert.equal(dp.sent.length, 1);
-  env.rows.push({ i: 1 });
-  await pipeline.save("r2");
-  assert.deepEqual(dp.sent[1].row_ranges, [[0, 1]]);
-});
-
-test("5xx is retried, without sleeping after the last attempt", async () => {
-  const { dp, env, pipeline } = setup();
-  dp.responses = [{ status: 503 }, { status: 503 }, { status: 503 }];
-  env.rows = [{ i: 0 }];
-  assert.equal((await pipeline.save("r")).ok, false);
-  assert.equal(dp.sent.length, 3);
-  assert.equal(env.sleeps.length, 2);
-});
-
-test("Retry-After is honoured but capped", async () => {
-  const { dp, env, pipeline } = setup({ maxRetryAfterMs: 2000 });
-  dp.responses = [{ status: 429, retryAfter: "120" }, { status: 201 }];
-  env.rows = [{ i: 0 }];
-  assert.equal((await pipeline.save("r")).ok, true);
-  assert.deepEqual(env.sleeps, [2000]);
-});
-
-test("network faults exhaust the retries", async () => {
-  const { dp, env, pipeline } = setup();
-  dp.responses = [{ throw: true }, { throw: true }, { throw: true }];
-  env.rows = [{ i: 0 }];
-  const r = await pipeline.save("r");
-  assert.equal(r.ok, false);
-  assert.equal(r.error, "network down");
-  assert.equal(dp.sent.length, 3);
-});
-
-test("concurrent saves never send a row twice", async () => {
-  const { dp, env, pipeline } = setup();
-  env.rows = [{ i: 0 }, { i: 1 }];
-  await Promise.all([pipeline.save("a"), pipeline.save("b")]);
-  const ids = rowIds(dp.sent);
-  assert.equal(new Set(ids).size, ids.length);
-});
-
-test("saving is inert without an experiment ID", async () => {
-  const { dp, env, pipeline } = setup({ experimentId: "" });
-  env.rows = [{ i: 0 }];
-  assert.deepEqual(await pipeline.save("r"), { ok: false, skipped: true });
-  assert.deepEqual(await pipeline.flush("final", 50), { ok: false, skipped: true });
-  assert.equal(dp.sent.length, 0);
-});
-
-test("a lossy session still reassembles every row exactly once", async () => {
-  const { dp, env, pipeline } = setup();
-  env.rows = [{ i: 0 }, { i: 1 }];
-  await pipeline.save("round-1");
-  env.rows.push({ i: 2 });
-  await pipeline.save("round-2");
-  dp.responses = [{ throw: true }, { throw: true }, { throw: true }];
-  env.rows.push({ i: 3 });
-  await pipeline.save("round-3"); // fails; rows go back in the queue
-  env.rows.push({ i: 4 });
-  await pipeline.flush("final-partner_left", 1000);
-
-  const chunks = [...dp.landed].sort((a, b) => a.chunk_seq - b.chunk_seq);
-  assert.deepEqual(rowIds(chunks), [0, 1, 2, 3, 4]);
-  const covered = chunks.flatMap((c) =>
-    c.row_ranges.flatMap(([s, e]) => Array.from({ length: e - s + 1 }, (_, k) => s + k)),
-  );
-  assert.deepEqual(covered, [0, 1, 2, 3, 4]);
-  assert.equal(chunks.at(-1).chunk_label, "final-partner_left");
-});
-
-test("a 409 on our own retry means the first attempt landed", async () => {
-  const { dp, env, pipeline } = setup();
-  dp.responses = [{ throw: true }, { status: 400, error: "OSF_FILE_EXISTS" }];
-  env.rows = [{ i: 0 }];
-  const r = await pipeline.save("r");
-  assert.equal(r.ok, true);
-  assert.equal(r.replayed, true);
-  assert.equal(new Set(dp.sent.map((s) => s.filename)).size, 1, "retries reuse one filename");
-  assert.equal((await pipeline.save("next")).empty, true, "rows are not requeued");
-});
-
-test("a 409 on the first attempt is a real clash and stays terminal", async () => {
-  const { dp, env, pipeline } = setup();
-  dp.responses = [{ status: 400, error: "OSF_FILE_EXISTS" }];
-  env.rows = [{ i: 0 }];
-  assert.equal((await pipeline.save("r")).ok, false);
-  assert.equal(dp.sent.length, 1);
-});
-
-test("filenames hold the multiplayer participant ID, never the Prolific PID", async () => {
-  const { dp, env, pipeline } = setup();
-  env.rows = [{ i: 0 }];
-  await pipeline.save("r");
-  assert.ok(!dp.sent[0].filename.includes("PROLIFIC123"), dp.sent[0].filename);
-  assert.ok(dp.sent[0].filename.startsWith("dyad1_p-7_0_r_"), dp.sent[0].filename);
-  assert.equal(dp.sent[0].prolific_pid, "PROLIFIC123");
-});
-
-test("missing IDs never become a literal 'null' in the filename", async () => {
-  const { dp, env, pipeline } = setup({
-    meta: () => ({ dyad_id: null, participant_id: null, prolific_pid: null, outcome: null }),
+function setup({ pipe = new Promise(() => {}), jatos = null, exit = "connection_lost" } = {}) {
+  const dom = fakeDom();
+  const timers = [];
+  const location = { href: "", search: "" };
+  const rows = [];
+  const context = vm.createContext({
+    console,
+    location,
+    window: { location },
+    jsPsychCallFunction: {},
+    document: dom.document,
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    clearTimeout: (handle) => { if (timers[handle - 1]) timers[handle - 1].fn = null; },
+    CONFIG: {
+      BLOCKS: 3,
+      IDLE_ROUNDS: 2,
+      NO_MATCH_PAYMENT_USD: 1.25,
+      SAVE_STATUS_BUDGET_MS: 3000,
+      PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
+      COMPLETION_CODES: { complete: "C1", partner_dropped: "C2", no_match: "C3", inactive: "C4", reloaded: "C5" },
+    },
+    SHAPES: Array.from({ length: 12 }, (_, i) => ({ id: String(i) })),
+    SCHEDULE: Array.from({ length: 36 }),
+    onJatos: Boolean(jatos),
+    jatos,
+    pipeSaved: pipe,
+    jsPsych: {
+      getDisplayElement: () => dom.display,
+      data: {
+        get: () => ({
+          filter: () => ({ count: () => 4, filter: () => ({ count: () => 3 }) }),
+          json: () => JSON.stringify(rows),
+          localSave: () => {},
+        }),
+        addProperties: (p) => rows.push(p),
+      },
+      multiplayer: { status: "connected", disconnect() { this.status = null; } },
+    },
   });
-  env.rows = [{ i: 0 }];
-  await pipeline.save("r");
-  assert.ok(!dp.sent[0].filename.includes("null"), dp.sent[0].filename);
+  vm.runInContext(hawkins, context);
+  vm.runInContext(`${stateSource}\n${terminalSource}`, context);
+  if (exit === "connection_lost") vm.runInContext(`interruption = "connection_lost"`, context);
+  if (exit === "reloaded") vm.runInContext("reloaded = true", context);
+  if (exit === "connect_error") vm.runInContext(`noMatchReason = "connect_error"`, context);
+
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+  return {
+    run: () => vm.runInContext("terminalScreen.func()", context),
+    screen: () => dom.attached[0],
+    displayHidden: () => dom.display.style.display === "none",
+    status: () => dom.document.getElementById("save-status")?.textContent,
+    submit: () => dom.document.getElementById("prolific-submit").click(),
+    disconnected: () => context.jsPsych.multiplayer.status === null,
+    location,
+    outcome: () => rows.find((r) => r.ended_reason),
+    async elapse(ms) {
+      await flush();
+      for (const t of timers.filter((t) => t.fn && t.ms <= ms)) {
+        const fn = t.fn;
+        t.fn = null;
+        fn();
+      }
+      await flush();
+    },
+    flush,
+  };
+}
+
+test("an upload that never resolves still gets the exit message and a working submit at once", async () => {
+  const s = setup({ exit: "connection_lost" });
+  assert.equal(s.run(), "connection_lost");
+  assert.ok(s.screen(), "terminal screen rendered synchronously, before any save settles");
+  assert.ok(s.displayHidden(), "the extension's 'Saving data' display is hidden behind the screen");
+  assert.match(s.screen().innerHTML, /We lost the connection to the game/);
+  assert.match(s.screen().innerHTML, /id="prolific-submit"/);
+  assert.equal(s.outcome().ended_reason, "connection_lost");
+  assert.ok(s.disconnected());
+  assert.equal(s.status(), "Saving your responses…");
+
+  s.submit();
+  assert.equal(s.location.href, "https://app.prolific.com/submissions/complete?cc=C2");
+
+  await s.elapse(3000);
+  assert.match(s.status(), /^Still uploading\. You can submit now/);
 });
 
-test("rows are not stranded when an earlier save fails after a later one", async () => {
-  const { dp, env, pipeline } = setup({ maxAttempts: 1 });
-  dp.responses = [{ delay: 30, status: 500 }, { status: 201 }, { status: 201 }];
-  env.rows = [{ i: 0 }, { i: 1 }, { i: 2 }];
-  const a = pipeline.save("A"); // claims 0-2, fails 30ms later
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  env.rows.push({ i: 3 }, { i: 4 });
-  const b = pipeline.save("B"); // claims 3-4, succeeds at once
-  await Promise.all([a, b]);
-  env.rows.push({ i: 5 });
-  await pipeline.save("C"); // picks up A's rows and row 5
-  assert.deepEqual(rowIds(dp.landed).sort((x, y) => x - y), [0, 1, 2, 3, 4, 5]);
+test("on JATOS, a hung JATOS submit and a hung pipe still allow submission", async () => {
+  const calls = [];
+  const jatos = {
+    submitResultData: () => new Promise(() => {}),
+    endStudyAndRedirect: (...args) => calls.push(args),
+  };
+  const s = setup({ jatos, exit: "complete" });
+  s.run();
+  assert.match(s.screen().innerHTML, /Game complete!/);
+  assert.doesNotMatch(s.screen().innerHTML, /Researcher tools/);
+  s.submit();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "https://app.prolific.com/submissions/complete?cc=C1");
+  assert.equal(calls[0][2], true);
+  await s.elapse(3000);
+  assert.match(s.status(), /^Still uploading/);
 });
 
-// ---- flush --------------------------------------------------------------------------------------
-
-test("flush always sends a final chunk carrying the outcome, even with no new rows", async () => {
-  const { dp, env, pipeline } = setup();
-  env.rows = [{ i: 0 }];
-  await pipeline.save("round-1");
-  env.outcome = { ended_reason: "complete", n_trials_completed: 36 };
-  const r = await pipeline.flush("final-complete", 1000);
-  assert.equal(r.ok, true);
-  const final = dp.landed.at(-1);
-  assert.equal(final.chunk_label, "final-complete");
-  assert.deepEqual(final.trials, []);
-  assert.deepEqual(final.outcome, { ended_reason: "complete", n_trials_completed: 36 });
+test("the status line follows an upload that finishes after the budget", async () => {
+  let resolve;
+  const s = setup({ pipe: new Promise((r) => { resolve = r; }), exit: "reloaded" });
+  s.run();
+  assert.match(s.screen().innerHTML, /This page was reloaded/);
+  await s.elapse(3000);
+  assert.match(s.status(), /^Still uploading/);
+  resolve({ ok: true, status: 201 });
+  await s.flush();
+  assert.equal(s.status(), "Your responses have been saved.");
 });
 
-test("flush waits for a save still in flight and includes the rows it put back", async () => {
-  const { dp, env, pipeline } = setup({ maxAttempts: 1 });
-  dp.responses = [{ delay: 30, status: 503 }, { status: 201 }];
-  env.rows = [{ i: 0 }, { i: 1 }];
-  pipeline.save("round-36"); // not awaited, as in the experiment
-  const r = await pipeline.flush("final-complete", 1000);
-  assert.equal(r.ok, true);
-  assert.deepEqual(rowIds(dp.landed), [0, 1]);
-});
+test("a prompt upload reports its result and cancels the budget message", async () => {
+  const ok = setup({ pipe: Promise.resolve({ ok: true }), exit: "connect_error" });
+  ok.run();
+  assert.match(ok.screen().innerHTML, /We could not match you with a partner/);
+  await ok.flush();
+  assert.equal(ok.status(), "Your responses have been saved.");
+  await ok.elapse(3000);
+  assert.equal(ok.status(), "Your responses have been saved.");
 
-test("flush does not report saved while rows are still unsent", async () => {
-  const { dp, env, pipeline } = setup({ maxAttempts: 1 });
-  dp.responses = [{ status: 503 }];
-  env.rows = [{ i: 0 }];
-  const r = await pipeline.flush("final", 1000);
-  assert.equal(r.ok, false);
-  assert.equal(dp.landed.length, 0);
-});
+  const failed = setup({ pipe: Promise.resolve({ ok: false, status: 0 }) });
+  failed.run();
+  await failed.flush();
+  assert.match(failed.status(), /not accepted/);
 
-test("flush gives up waiting within its budget", async () => {
-  const { dp, env, pipeline } = setup({
-    baseBackoffMs: 500,
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  });
-  dp.responses = [{ throw: true }, { throw: true }, { throw: true }];
-  env.rows = [{ i: 0 }];
-  const t0 = Date.now();
-  const r = await pipeline.flush("final", 50);
-  assert.ok(Date.now() - t0 < 300, `${Date.now() - t0}ms`);
-  assert.equal(r.timedOut, true);
+  const off = setup({ pipe: Promise.resolve({ skipped: true }) });
+  off.run();
+  await off.flush();
+  assert.match(off.status(), /DataPipe is off for local runs/);
 });
