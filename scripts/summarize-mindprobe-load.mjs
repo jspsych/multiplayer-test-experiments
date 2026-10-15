@@ -3,7 +3,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 const folders = (await readdir('.build')).filter(n => /^load-.*pairs$/.test(n)).sort();
 const lines = ['## Executed stages (generated from local artifacts)', '',
-  '| Pairs | Gameplay completed | Confirmed saves | Peak gameplay clients | Duration (s) | Pairing p95 (ms) | Min free GiB | Peak CPU % | HTTP / JS errors | Result |',
+  '| Pairs | Gameplay completed | Confirmed saves | Peak gameplay clients | Duration (s) | Group ID observed p95 (ms) | Min free GiB | Peak CPU % | HTTP / JS errors | Result |',
   '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
 const evidence = [];
 for (const folder of folders) {
