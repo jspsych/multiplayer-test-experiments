@@ -9,10 +9,16 @@ live, version, and be piloted independently.
 
 - [`reference-game-hawkins.html`](reference-game-hawkins.html) — replicates Hawkins, Frank & Goodman
   (2020), *Cognitive Science* 44, e12845. Sequential condition: single target per trial, one click.
-  Currently the paid-pilot build: 18 trials, with Prolific exits, dropout
-  handling and data saving. Runs on the local adapter or as a JATOS group study.
-- [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (schedule, round classification,
-  exit routing, and JATOS saving), kept out of the page so [`tests/`](tests/) can load it.
+  Currently the paid-pilot build: 18 trials, after a walkthrough of the game screen and two paired
+  practice rounds, with Prolific exits, dropout handling and data saving. Runs on the local adapter
+  or as a JATOS group study.
+- [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (main and practice schedules, the
+  pair barriers, round classification, exit routing, and JATOS saving), kept out of the page so
+  [`tests/`](tests/) can load it.
+- [`hawkins-onboarding.js`](hawkins-onboarding.js) — the seven-step, role-specific walkthrough of
+  the game screen shown after the role recap. Practice rounds use targets outside the dyad's main
+  schedule and are saved with `phase: "practice"`; see
+  [`WALKTHROUGH-PRACTICE.md`](WALKTHROUGH-PRACTICE.md).
 - [`hawkins-ui.js`](hawkins-ui.js) — the Hawkins round display: separate trial, number-correct and
   time-remaining panels, a warning in each round's last 10 seconds, a "Correct!", "Incorrect." or
   "Time's up!" result line, and labels for the chat. Presentation only; see
@@ -130,7 +136,8 @@ way the Hawkins build was.
 **Not yet.** [`READINESS.md`](READINESS.md) is the full audit, written before jspsych-multiplayer
 gained session IDs, group formation and rejoin detection, so parts of it are out of date. The Hawkins
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
-randomness, dropout detection with paid exits, per-round timeout classification (timeouts never end
+randomness, a walkthrough and two practice rounds before the main game (which add time the
+advertised duration and reward must include), dropout detection with paid exits, per-round timeout classification (timeouts never end
 the game), reload detection, Prolific IDs and completion routing, and saving to JATOS and DataPipe. Still open: real completion codes are unset in
 `CONFIG` (placeholders stand in); the build has not run on a real JATOS server, so no JATOS-hosted
 run has yet been checked end to end in the DataPipe Drive folder (a local `?datapipe=1` run can

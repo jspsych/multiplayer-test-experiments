@@ -7,6 +7,7 @@ import vm from "node:vm";
 const page = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
 const source = page.slice(page.indexOf("    const roleTrial ="), page.indexOf("    const gameRound ="));
 const gameSource = page.slice(page.indexOf("    const gameLoop ="), page.indexOf("    // ---- Terminal screen"));
+const sessionLogic = fs.readFileSync(new URL("../hawkins.js", import.meta.url), "utf8");
 
 function setup() {
   let role;
@@ -16,17 +17,21 @@ function setup() {
   let presence = { "694": "connected", "695": "connected" };
   let readFails = false;
   const writes = [];
+  const status = { textContent: "" };
+  const display = { innerHTML: "", querySelector: (selector) => (selector === ".hk-barrier-status" ? status : null) };
   const context = vm.createContext({
     onJatos: true,
     MIN_PLAYERS: 2,
-    CONFIG: { PAIRING_TIMEOUT_MS: 30000, READY_TIMEOUT_MS: 120000 },
+    CONFIG: { PAIRING_TIMEOUT_MS: 30000, READY_TIMEOUT_MS: 120000, NO_MATCH_PAYMENT_USD: 1.25, INTERFACE_WALKTHROUGH: true },
+    money: (usd) => `$${usd.toFixed(2)}`,
+    SHAPES: [], SCHEDULE: [], PRACTICE_SCHEDULE: [], roundSeconds: 60,
     jsPsychCallFunction: {},
     jsPsychMultiplayerRole: {
       getMyRole: () => role,
       participantsByRole: () => ({ director: ["694"], matcher: ["695"] }),
     },
     jsPsych: {
-      getDisplayElement: () => ({}),
+      getDisplayElement: () => display,
       multiplayer: {
         getAll: () => {
           if (readFails) throw new Error("offline");
@@ -44,9 +49,11 @@ function setup() {
     setInterval: (callback) => { tick = callback; return 1; },
     clearInterval: () => { tick = undefined; },
   });
+  // The barrier logic lives in hawkins.js; load it into this context so it runs on the fake clock.
+  vm.runInContext(sessionLogic, context);
   vm.runInContext(
-    `let myRole = null, partnerId = null, participantId = null, noMatchReason = null, reloaded = false;\n${source}\n` +
-    `const gameRound = {}, SCHEDULE = [];\n${gameSource}`,
+    "let myRole = null, partnerId = null, participantId = null, noMatchReason = null, reloaded = false;\n" +
+    `let interruption = null;\n${source}\nconst gameRound = {};\n${gameSource}`,
     context,
   );
   return {
@@ -63,6 +70,8 @@ function setup() {
       if (node.conditional_function()) node.timeline[0].func((data) => { context.row = data; });
     },
     row: () => context.row,
+    status: () => status.textContent,
+    walkthroughAllowed: () => vm.runInContext("interfaceWalkthrough.conditional_function()", context),
     setPresence(next) { presence = next; },
     setReadFails(value) { readFails = value; },
     reason: () => vm.runInContext("noMatchReason", context),
@@ -166,4 +175,30 @@ test("unreadable state fails closed until the deadline", () => {
   run.advance(120000);
   assert.equal(run.waiting(), false);
   assert.equal(run.reason(), "partner_not_ready");
+});
+
+test("the ready barrier says whether the partner is still reading or has lost their connection", () => {
+  const run = setup();
+  run.pair("completed", "director");
+  run.runReadiness();
+  run.advance(500, { "694": { ready: true } });
+  assert.match(run.status(), /still reading the instructions/);
+  run.setPresence({ "694": "connected", "695": "away" });
+  run.advance(500, { "694": { ready: true } });
+  assert.match(run.status(), /lost their connection/);
+  assert.equal(run.waiting(), true);
+});
+
+test("the walkthrough runs only for a paired director or matcher, as the ready barrier does", () => {
+  for (const [outcome, role, allowed] of [
+    ["completed", "director", true],
+    ["completed", "matcher", true],
+    ["participant_left", undefined, false],
+    ["timeout", undefined, false],
+    ["completed", "spectator", false],
+  ]) {
+    const run = setup();
+    run.pair(outcome, role);
+    assert.equal(run.walkthroughAllowed(), allowed, `${outcome}/${role}`);
+  }
 });
