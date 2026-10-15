@@ -21,6 +21,7 @@
     <script src="vendor/plugin-multiplayer-reference-game.js"></script>
     <script src="tangrams.js"></script>
     <script src="hawkins.js"></script>
+    <script src="presence-check.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
       /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
@@ -99,6 +100,38 @@
       }
       .hk-round-note.is-timeout {
         color: #c92a2a;
+      }
+
+      /* "Are you still with us?" reminder (presence-check.js). The backdrop takes clicks so the
+         button is the only response; the round's timers keep running underneath. */
+      .presence-check {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.45);
+      }
+      .presence-check[hidden] {
+        display: none;
+      }
+      .presence-check-card {
+        max-width: 26em;
+        padding: 1.2em 1.6em;
+        border-radius: 8px;
+        background: #fff;
+        text-align: center;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+      }
+      .presence-check-button {
+        padding: 0.5em 1.4em;
+        font-size: 1.05em;
+      }
+      .presence-check-remaining {
+        margin-bottom: 0;
+        font-size: 0.9em;
+        color: #555;
       }
 
       /* "Partner is typing…" hint from the plugin's `typing_indicator`. The original has one too
@@ -193,6 +226,10 @@
       // Backstop `round_timeout` after the limit, for when the matcher's submission never arrives
       // (e.g. a frozen tab). That round ends without feedback, still as a timeout.
       ROUND_TIMEOUT_GRACE_MS: 5000,
+      // "Are you still with us?" reminder during rounds (presence-check.js): shown after this long
+      // with no activity, closed as missed if its button is not clicked in time. Never ends the game.
+      PRESENCE_PROMPT_MS: 30000,
+      PRESENCE_RESPONSE_MS: 15000,
       // How long a partner can be disconnected before they count as gone (core default: 10s).
       DROPOUT_TIMEOUT_MS: 30000,
       // How long this participant's own connection can stay down before the session gives up on it
@@ -225,7 +262,7 @@
       ? new Promise((resolve) => { resolvePipeSave = resolve; })
       : Promise.resolve({ skipped: true });
     const jsPsych = initJsPsych({
-      extensions: [{
+      extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,
         params: {
           experiment_id: CONFIG.DATAPIPE_EXPERIMENT_ID,
@@ -422,6 +459,8 @@
              trial shows the time remaining. If time runs out before the Matcher picks, you both
              see a "Time's up" message (the Matcher also sees the correct shape), then move on to
              the next trial.</li>
+         <li>If you're inactive for a while, a message will ask you to click a button to show
+             you're still with us.</li>
          <li>After the choice, the correct shape is outlined in green on the Matcher's screen. If the
              Matcher picked a different one, their pick is outlined in blue.</li>
        </ul>
@@ -781,6 +820,15 @@
       round_timeout: CONFIG.ROUND_TIMEOUT_MS + CONFIG.ROUND_TIMEOUT_GRACE_MS,
       // A partner who leaves ends the round with multiplayer_outcome: "participant_left".
       end_on_participant_left: true,
+      // Suppressed once feedback starts (inFeedbackPhase), so it never covers the round's result.
+      extensions: [{
+        type: jsPsychExtensionPresenceCheck,
+        params: {
+          prompt_after: CONFIG.PRESENCE_PROMPT_MS,
+          respond_within: CONFIG.PRESENCE_RESPONSE_MS,
+          paused: () => inFeedbackPhase(),
+        },
+      }],
       save_interaction_history: true,
       // Instruction wording from the original (game.client.js `client_onjoingame`), with one fix:
       // the original tells both roles they may "talk to the director", a copy-paste slip, so the

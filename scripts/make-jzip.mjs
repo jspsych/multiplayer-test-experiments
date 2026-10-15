@@ -20,7 +20,7 @@
  *
  *   <title>.jas                  <- study properties, 1 component, 1 batch
  *   <dirName>/                   <- exactly one top-level dir (study assets)
- *     reference-game-hawkins.html  tangrams.js  hawkins.js
+ *     reference-game-hawkins.html  tangrams.js  hawkins.js  presence-check.js
  *     assets/tangrams/...  vendor/...   (vendor/ as filled by scripts/vendor.mjs)
  *
  * The .jas envelope is {"version": "3", "data": {...}} using only the
@@ -113,6 +113,7 @@ const ASSET_PATHS = [
   "reference-game-hawkins.html",
   "tangrams.js",
   "hawkins.js",
+  "presence-check.js",
   "assets/tangrams/tangram_A.png",
   "assets/tangrams/tangram_B.png",
   "assets/tangrams/tangram_C.png",

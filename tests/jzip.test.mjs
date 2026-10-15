@@ -69,7 +69,8 @@ test("the archive's end record counts every entry", { skip: !hasVendor && "run s
 // A copy of the study inputs, with the page's completion codes replaced by `codes`.
 function studyCopy(codes) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jzip-codes-"));
-  for (const p of ["scripts", "assets", "vendor", "tangrams.js", "hawkins.js"]) {
+  const scripts = fs.readdirSync(REPO).filter((f) => f.endsWith(".js"));
+  for (const p of ["scripts", "assets", "vendor", ...scripts]) {
     fs.cpSync(path.join(REPO, p), path.join(dir, p), { recursive: true });
   }
   const page = fs.readFileSync(path.join(REPO, "reference-game-hawkins.html"), "utf8");

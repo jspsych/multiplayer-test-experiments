@@ -197,7 +197,7 @@ test("there is no inactivity exit or completion code any more", () => {
   }
   assert.equal(Object.values(EXIT_CODES).includes("inactive"), false);
   const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
-  assert.doesNotMatch(html, /inactive/);
+  assert.doesNotMatch(html, /inactive_self|inactive_partner|\binactive:|"inactive"/);
 });
 
 test("the page never ends the game on a timeout", () => {
