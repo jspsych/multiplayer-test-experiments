@@ -155,8 +155,10 @@
       PILOT_LABEL: "hawkins-36-trial-paid-pilot",
       BLOCKS: 3,
       COMPREHENSION_CHECK: true,
-      // Replace these placeholders with real Prolific codes before the paid run. The placeholder
-      // allows testing the redirect, but is not a valid Prolific completion code.
+      // Replace these placeholders with real Prolific codes before the paid run. A placeholder
+      // (Hawkins.PLACEHOLDER_CODES) is shown as a test code and lets a test run try the redirect, but
+      // Prolific will not accept it, so scripts/make-jzip.mjs refuses to build the JATOS archive
+      // while any code is empty or a placeholder (unless run with --allow-placeholder-codes).
       COMPLETION_CODES: {
         complete: "insertcodehere",
         partner_dropped: "insertcodehere", // partner left or went idle, or connection was lost
@@ -258,7 +260,7 @@
 
     (function warnOnUnsetConfig() {
       const unset = Object.entries(CONFIG.COMPLETION_CODES)
-        .filter(([, v]) => !v || v === "insertcodehere")
+        .filter(([, v]) => !Hawkins.isRealCode(v))
         .map(([k]) => k);
       if (unset.length) console.warn(`Unset Prolific completion code(s): ${unset.join(", ")}`);
       if (!CONFIG.DATAPIPE_EXPERIMENT_ID) console.warn("DataPipe experiment ID is unset.");
@@ -310,11 +312,26 @@
 
     function submissionBlockHTML(codeKey) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
-      if (!code) return `<p>No completion code is configured. Please message the researcher.</p>`;
-      const testNotice = code === "insertcodehere"
-        ? `<p>This is a test completion code. The button tests the return to Prolific.</p>`
-        : "";
-      return `${testNotice}<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
+      if (!code) {
+        return `<p style="color:#b00"><strong>Something has gone wrong on our end.</strong> The
+                completion code for this exit
+                (<code>${codeKey}</code>) is missing, so the automatic submission cannot run.</p>
+                <p style="color:#b00">Please <strong>message the researcher from this study's page on
+                Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>. You will be
+                paid, so do not return the study. Please keep this tab open until you have sent it.</p>`;
+      }
+      if (Hawkins.isPlaceholderCode(code)) {
+        // A setup build: the button still tries the redirect, so a test run can check it.
+        return `<div class="test-code-notice" style="border:2px dashed #b00;padding:0.5em 1em;margin:1em auto;max-width:36em">
+                <p style="color:#b00"><strong>Test build: this is a placeholder completion code, not a
+                real one.</strong> Prolific will not accept <code>${code}</code>.</p>
+                <p>If you are taking part in the study, please <strong>message the researcher from this
+                study's page on Prolific</strong> and quote <code style="user-select:all">${codeKey}</code>.
+                You will be paid, so do not return the study.</p>
+                <p><button id="prolific-submit" type="button">Test the return to Prolific</button></p>
+                </div>`;
+      }
+      return `<p><button id="prolific-submit" type="button">Submit and return to Prolific</button></p>
               <p style="font-size:0.9em">If that button does not work, your completion code is
               <code style="user-select:all">${code}</code>. Paste it into Prolific to submit.</p>`;
     }
@@ -687,6 +704,18 @@
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
+    // True while the current round shows feedback. The plugin enters feedback when the matcher's
+    // submission reaches the round's shared data (Hawkins.roundHasSubmission), on both clients and
+    // whether or not it renders any feedback text, so read that rather than the feedback DOM. Outside
+    // a trial, or once the session has closed, the read throws and this is false.
+    function inFeedbackPhase() {
+      try {
+        return Hawkins.roundHasSubmission(jsPsych.multiplayer.getAll({ scope: "trial" }));
+      } catch {
+        return false;
+      }
+    }
+
     let roundCountdownInterval = null;
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
@@ -740,10 +769,9 @@
         // The plugin starts its wall-clock round timeout during synchronous trial setup, just
         // before jsPsych calls on_load. Stop this display when feedback begins or the trial ends.
         const remaining = document.getElementById("round-remaining");
-        const feedback = document.querySelector(".jspsych-multiplayer-reference-game-feedback");
         const deadline = Date.now() + CONFIG.ROUND_TIMEOUT_MS;
         const update = () => {
-          if (feedback?.textContent) {
+          if (inFeedbackPhase()) {
             remaining.textContent = "Selection complete";
             clearInterval(countdownInterval);
           } else {

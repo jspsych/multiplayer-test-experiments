@@ -70,7 +70,10 @@ should be ported to Hawkins rather than treating C&WG as the first launch target
 
 `npm test` runs the tests. As a JATOS group study: `npm run jzip`, then import the `.jzip` with
 JATOS's **Import Study**. The batch's **Max active members** must be 2; JATOS then pairs arrivals
-from a single study link and the adapter seals each pair.
+from a single study link and the adapter seals each pair. `npm run jzip` refuses to build while any
+Prolific completion code in `CONFIG.COMPLETION_CODES` is empty or a placeholder (`insertcodehere`).
+For a test build, run `npm run jzip -- --allow-placeholder-codes`; the page then labels each code as
+a test code, and the study's JATOS comments say it is a test build.
 
 ### DataPipe setup for the Hawkins pilot
 
