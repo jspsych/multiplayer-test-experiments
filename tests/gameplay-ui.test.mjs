@@ -101,7 +101,7 @@ test("the result is scored from the assignment, not the matcher's reported n_cor
 const page = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
 const gameSource = page.slice(
   page.indexOf("    // True while the current round shows feedback"),
-  page.indexOf("    const gameLoop ="),
+  page.indexOf("    // Practice: the same round as the main game"),
 );
 
 // A jsPsych data collection with the filter/count calls the prompt uses.
@@ -111,7 +111,7 @@ const collection = (rows) => ({
 });
 
 // Runs the page's gameRound prompt and on_load against a fake display, clock and shared data.
-function round({ role = "matcher", targets = ["C"], rows = [], roundMs = 60000 } = {}) {
+function round({ role = "matcher", targets = ["C"], rows = [], roundMs = 60000, phase = "main" } = {}) {
   const d = fakeDisplay();
   const clock = { now: 1_000_000 };
   let group = {};
@@ -122,7 +122,7 @@ function round({ role = "matcher", targets = ["C"], rows = [], roundMs = 60000 }
       ROUND_TIMEOUT_MS: roundMs, ROUND_TIMEOUT_GRACE_MS: 5000, TIMER_WARNING_SECONDS: 10,
       PRESENCE_PROMPT_MS: 30000, PRESENCE_RESPONSE_MS: 15000,
     },
-    SHAPES: [], SCHEDULE: new Array(18), roundSeconds: roundMs / 1000,
+    SHAPES: [], SCHEDULE: new Array(18), PRACTICE_SCHEDULE: new Array(2), roundSeconds: roundMs / 1000,
     myRole: role, participantId: "me", partnerId: "them",
     Hawkins, HawkinsUI,
     Date: { now: () => clock.now },
@@ -133,7 +133,7 @@ function round({ role = "matcher", targets = ["C"], rows = [], roundMs = 60000 }
     document: { getElementById: (id) => d.nodes[`#${id}`] ?? null, querySelectorAll: () => [] },
     jsPsych: {
       timelineVariable: (name) => ({ name }),
-      evaluateTimelineVariable: (name) => (name === "targets" ? targets : undefined),
+      evaluateTimelineVariable: (name) => ({ targets, phase })[name],
       getDisplayElement: () => d,
       data: { get: () => collection(rows) },
       multiplayer: {
@@ -162,12 +162,33 @@ function round({ role = "matcher", targets = ["C"], rows = [], roundMs = 60000 }
 }
 
 const playedRows = [
-  { trial_type: "multiplayer-reference-game", correct: true },
-  { trial_type: "multiplayer-reference-game", correct: false },
-  { trial_type: "multiplayer-reference-game", correct: null }, // a timeout, after classifyRound
-  { trial_type: "multiplayer-reference-game", correct: true },
+  { trial_type: "multiplayer-reference-game", phase: "main", correct: true },
+  { trial_type: "multiplayer-reference-game", phase: "main", correct: false },
+  { trial_type: "multiplayer-reference-game", phase: "main", correct: null }, // a timeout, after classifyRound
+  { trial_type: "multiplayer-reference-game", phase: "main", correct: true },
   { trial_type: "instructions" },
 ];
+
+// Two practice rounds, both correct: they must not count toward the main game's header.
+const practiceRows = [
+  { trial_type: "multiplayer-reference-game", phase: "practice", correct: true },
+  { trial_type: "multiplayer-reference-game", phase: "practice", correct: true },
+];
+
+test("practice has its own progress and score, and the main game starts again from zero", () => {
+  const practice = round({ phase: "practice", rows: practiceRows.slice(0, 1) });
+  assert.match(practice.header, /<span>Practice<\/span><strong>Round 2 of 2<\/strong>/);
+  assert.match(practice.header, /Practice correct/);
+  assert.match(practice.header, /data-score="1"/);
+  const firstMain = round({ rows: practiceRows });
+  assert.match(firstMain.header, /Trial 1 of 18/);
+  assert.match(firstMain.header, /Number correct/);
+  assert.match(firstMain.header, /data-score="0"/);
+  assert.doesNotMatch(firstMain.header, /Practice/);
+  const later = round({ rows: [...practiceRows, ...playedRows] });
+  assert.match(later.header, /Trial 5 of 18/);
+  assert.match(later.header, /data-score="2"/);
+});
 
 test("the page shows Correct from the assignment and counts the round once", () => {
   for (const role of ["matcher", "director"]) {

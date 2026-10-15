@@ -23,6 +23,7 @@
     <script src="hawkins.js"></script>
     <script src="presence-check.js"></script>
     <script src="hawkins-ui.js"></script>
+    <script src="hawkins-onboarding.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
     <style>
       /* STIMULUS GEOMETRY, reproduced from hawkrobe/tangrams `tangrams_sequential` (the "cued"
@@ -242,6 +243,56 @@
         color: #555;
       }
 
+      /* INTERFACE WALKTHROUGH (hawkins-onboarding.js): a static preview of the game screen, revealed
+         one part at a time. The plugin's own styles are not on the page until the first round, so
+         the preview's grid and chat are styled here. */
+      .hk-walk-copy {
+        max-width: 44em;
+        margin: 0 auto 20px;
+        line-height: 1.45;
+      }
+      .hk-walk-copy h2:focus {
+        outline: none;
+      }
+      .hk-walk-step {
+        margin-bottom: 0;
+        color: #58606b;
+        font-size: 15px;
+      }
+      .hk-walk-copy button {
+        padding: 10px 20px;
+        font: inherit;
+      }
+      .hk-preview-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 130px));
+        gap: 8px;
+        justify-content: center;
+      }
+      .hk-preview-grid .jspsych-multiplayer-reference-game-cell {
+        border: 2px solid #ccc;
+        border-radius: 6px;
+      }
+      .hk-preview-grid .jspsych-multiplayer-reference-game-cell.is-target {
+        border-color: #e5a000;
+        box-shadow: 0 0 0 2px #e5a000;
+      }
+      .hk-preview-chat .jspsych-multiplayer-reference-game-chat-log {
+        border: 1px solid #ccc;
+        border-radius: 6px;
+      }
+      .hk-preview-chat form {
+        display: flex;
+        gap: 10px;
+      }
+      .hk-preview-chat input {
+        flex: 1;
+        min-width: 0;
+      }
+      .hk-walkthrough [hidden] {
+        display: none !important;
+      }
+
       /* "Partner is typing…" hint from the plugin's `typing_indicator`. The original has one too
          (sharedUtils/clientBase.js sends `playerTyping` and shows "Other player is typing..."). */
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-typing-hint {
@@ -299,6 +350,10 @@
     //      A comprehension check repeats with corrective feedback before the lobby. The page
     //      connects to the multiplayer session only after both, so nobody is paired while still
     //      reading.
+    //   5. After the role recap, a role-specific walkthrough of the game screen, then two paired
+    //      practice rounds on tangrams that are not targets in the dyad's main schedule. Practice
+    //      rows are saved with `phase: "practice"` and never count toward the main game
+    //      (WALKTHROUGH-PRACTICE.md).
     //
     // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
     // correct, rt.
@@ -311,6 +366,11 @@
       BLOCKS: 3,
       TARGETS_PER_BLOCK: 6, // random subset per dyad; all 12 shapes remain visible
       COMPREHENSION_CHECK: true,
+      // The role-specific walkthrough of the game screen after the role recap (hawkins-onboarding.js).
+      INTERFACE_WALKTHROUGH: true,
+      // Paired practice rounds before the main game, each on a tangram outside the dyad's main
+      // schedule (so at most 12 - TARGETS_PER_BLOCK). 0 turns practice off.
+      PRACTICE_ROUNDS: 2,
       // Replace these placeholders with real Prolific codes before the paid run. A placeholder
       // (Hawkins.PLACEHOLDER_CODES) is shown as a test code and lets a test run try the redirect, but
       // Prolific will not accept it, so scripts/make-jzip.mjs refuses to build the JATOS archive
@@ -325,10 +385,12 @@
       NO_MATCH_PAYMENT_USD: 1.25,
       LOBBY_TIMEOUT_MS: 5 * 60000,
       PAIRING_TIMEOUT_MS: 30000,
-      // How long to wait after the role recap for the partner to press Continue before giving up
-      // and routing to the no-match exit. Without this barrier the faster reader would start round
-      // 1 (and its 60s timer) alone while the partner is still reading, desyncing the two timelines.
-      READY_TIMEOUT_MS: 2 * 60000,
+      // How long each pair barrier waits for the partner to continue before giving up: after the
+      // role recap and walkthrough (no-match exit) and, with practice, after the practice rounds
+      // (partner-dropped exit). Without a barrier the faster reader would start a round (and its
+      // 60s timer) alone while the partner is still reading, desyncing the two timelines. Long
+      // enough for a slow reader to finish the walkthrough.
+      READY_TIMEOUT_MS: 3 * 60000,
       // Round limit, as the matcher's `selection_timeout`: on expiry both players see feedback.
       ROUND_TIMEOUT_MS: 60000,
       // The timer panel shows a warning for this many seconds before ROUND_TIMEOUT_MS.
@@ -390,6 +452,7 @@
     const SHAPES = Tangrams.STIMULI; // 12 canonical tangrams (ids A–L, image src)
     // Built after connecting, from the session's shared randomness (see connectSession()).
     let SCHEDULE = [];
+    let PRACTICE_SCHEDULE = [];
 
     // Identity, captured once connected. Every jsPsych row recorded while connected gets these
     // as multiplayer_participant_id and multiplayer_session_id.
@@ -413,6 +476,9 @@
       config_blocks: CONFIG.BLOCKS,
       config_targets_per_block: CONFIG.TARGETS_PER_BLOCK,
       config_comprehension_check: CONFIG.COMPREHENSION_CHECK,
+      config_interface_walkthrough: CONFIG.INTERFACE_WALKTHROUGH,
+      config_practice_rounds: CONFIG.PRACTICE_ROUNDS,
+      config_ready_timeout_ms: CONFIG.READY_TIMEOUT_MS,
       config_n_stimuli: SHAPES.length,
       config_round_timeout_ms: CONFIG.ROUND_TIMEOUT_MS,
       viewport_w: window.innerWidth,
@@ -437,17 +503,21 @@
     let partnerId = null;
     let reloaded = false;
     let noMatchReason = null;
-    let interruption = null; // "partner_left" | "connection_lost"
+    // "partner_left" | "connection_lost" | "partner_not_ready_for_main"
+    let interruption = null;
     let interruptedAtRound = null;
+    let interruptedPhase = null; // "practice" | "main_ready" | "main"
     let outcome = null;
 
+    // Main-game rounds only: practice rows (phase "practice") never count toward the main game's
+    // progress, score, block count or completion.
     const completedRounds = () =>
-      jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", multiplayer_outcome: "completed" });
+      jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", phase: "main", multiplayer_outcome: "completed" });
     // Rounds that ran to their end, with a choice or a timeout; the game goes on after either.
-    const playedRounds = () =>
+    const playedRounds = (phase = "main") =>
       jsPsych.data
         .get()
-        .filterCustom((t) => t.trial_type === "multiplayer-reference-game" &&
+        .filterCustom((t) => t.trial_type === "multiplayer-reference-game" && t.phase === phase &&
           (t.multiplayer_outcome === "completed" || t.multiplayer_outcome === "timeout"));
 
     function recordOutcome(exit) {
@@ -458,6 +528,8 @@
         ended_reason: exit,
         no_match_reason: noMatchReason,
         interrupted_at_round: interruptedAtRound,
+        interrupted_phase: interruptedPhase,
+        n_practice_played: playedRounds("practice").count(),
         n_trials_completed: completed,
         n_trials_timed_out: played - completed,
         n_trials_played: played,
@@ -576,7 +648,11 @@
              in green on the Matcher's screen. If the Matcher picked a different one, their pick is
              outlined in blue.</li>
        </ul>
-       <p>There are ${totalRounds} trials, with no breaks.</p>
+       <p>${CONFIG.PRACTICE_ROUNDS
+         ? `After you're paired, we'll show you the game screen, and you'll play
+            ${CONFIG.PRACTICE_ROUNDS} practice rounds together. Then the main game has
+            ${totalRounds} trials, with no breaks. Practice doesn't count toward your score.`
+         : `There are ${totalRounds} trials, with no breaks.`}</p>
        <p>${CONFIG.COMPREHENSION_CHECK ? "Next, answer three quick questions about the task. Then you" : "Next you"}
           will wait to be paired with a partner.</p>`,
       { instruction_screen: "general" },
@@ -812,66 +888,87 @@
         (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
 
-    // Ready barrier: both partners enter the game together. Each side merges a ready flag and
-    // polls until both pair members are connected and ready, so nobody starts round 1 (and its 60s
-    // timer) while the partner is still reading. A plain poll rather than the multiplayer-sync
-    // plugin: core wait() rejects when a participant leaves, and that rejection has no handler
-    // inside a plugin trial, while here every outcome lands on exactly one terminal state.
-    //   • A partner who has left ends the wait at once (partner_left_before_start).
-    //   • A disconnected partner, or unreadable state, never counts as ready: the wait fails closed
-    //     and the deadline bounds it.
-    //   • On timeout this side withdraws its flag before leaving, so a partner who becomes ready at
-    //     the deadline is less likely to start alone on a stale flag.
-    const readyTrial = {
-      type: jsPsychCallFunction,
-      async: true,
-      func: (done) => {
-        const startedAt = Date.now();
-        jsPsych.getDisplayElement().innerHTML = `
-          <p>Waiting for your partner to be ready…</p>
-          <p style="font-size:0.9em;color:#555">The game starts for both of you as soon as everyone
-             has continued.</p>`;
-        let finished = false;
-        const finish = (result) => {
-          if (finished) return;
-          finished = true;
-          clearInterval(ticker);
-          if (result !== "matched") noMatchReason = result;
-          done({ waiting_ready: result, ready_wait_ms: Date.now() - startedAt });
-        };
-        const setReady = (ready) => {
-          // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
-          // replace would wipe. Guarded both ways so a failed write can never skip the ticker.
-          try {
-            Promise.resolve(jsPsych.multiplayer.update({ ready }, { scope: "session" })).catch(() => {});
-          } catch {
-            // Synchronous failure (e.g. closed session): the deadline still ends the wait.
-          }
-        };
-        const ticker = setInterval(() => {
-          try {
-            const state = jsPsych.multiplayer.getAll({ scope: "session" }) ?? {};
-            const presence = jsPsych.multiplayer.presence() ?? {};
-            if (presence[partnerId] === "left") {
-              finish("partner_left_before_start");
-              return;
-            }
-            const pair = [participantId, partnerId];
-            if (pair.every((id) => id && presence[id] === "connected" && state[id]?.ready === true)) {
-              finish("matched");
-              return;
-            }
-          } catch {
-            // Unreadable state must not start the game; the deadline still bounds the wait.
-          }
-          if (Date.now() - startedAt > CONFIG.READY_TIMEOUT_MS) {
-            setReady(false);
-            finish("partner_not_ready");
-          }
-        }, 500);
-        setReady(true);
-      },
+    // Role-specific walkthrough of the game screen (hawkins-onboarding.js), after the recap and
+    // before the ready barrier, so each partner reads at their own pace and the barrier then lines
+    // the pair up. The Director's preview outlines the first practice target, which is never a
+    // main-game target.
+    const interfaceWalkthrough = {
+      timeline: [
+        {
+          type: jsPsychCallFunction,
+          async: true,
+          func: (done) =>
+            HawkinsOnboarding.walkthrough(jsPsych.getDisplayElement(), {
+              role: myRole,
+              shapes: SHAPES,
+              target:
+                PRACTICE_SCHEDULE[0]?.targets[0] ??
+                SHAPES.find((s) => !SCHEDULE.some((t) => t.targets[0] === s.id))?.id ??
+                SHAPES[0].id,
+              seconds: roundSeconds,
+              practiceRounds: PRACTICE_SCHEDULE.length,
+              mainRounds: SCHEDULE.length,
+            }, done),
+          on_finish: () => saveProgress(),
+        },
+      ],
+      conditional_function: () =>
+        CONFIG.INTERFACE_WALKTHROUGH && (myRole === "director" || myRole === "matcher") && !noMatchReason,
     };
+
+    // A pair barrier (Hawkins.waitForPair) as a trial: both partners continue together, or the
+    // wait ends on the partner leaving or on READY_TIMEOUT_MS. While it waits, the screen says
+    // whether the partner is still reading or seems to have lost their connection. `copy` holds
+    // the heading, the two waiting messages and the note on the time limit; `onResult(result)`
+    // routes a failure and returns the row's fields.
+    const readyMinutes = Math.round(CONFIG.READY_TIMEOUT_MS / 60000);
+    function pairBarrierTrial(flag, copy, onResult) {
+      return {
+        type: jsPsychCallFunction,
+        async: true,
+        func: (done) => {
+          const display = jsPsych.getDisplayElement();
+          display.innerHTML = `
+            <div class="hk-barrier" style="max-width: 36em; margin: 2em auto; line-height: 1.45;">
+              <p><strong>${copy.heading}</strong></p>
+              <p class="hk-barrier-status" aria-live="polite">Waiting for your partner…</p>
+              <p style="font-size:0.9em;color:#555">${copy.limit}</p>
+            </div>`;
+          const status = display.querySelector(".hk-barrier-status");
+          Hawkins.waitForPair(jsPsych.multiplayer, {
+            self: participantId,
+            partner: partnerId,
+            flag,
+            timeoutMs: CONFIG.READY_TIMEOUT_MS,
+            onWaiting: (state) => {
+              // Only on a change, so the live region is not re-announced every poll.
+              if (status && status.textContent !== copy[state]) status.textContent = copy[state];
+            },
+          }, ({ result, wait_ms }) => done({ ...onResult(result), ready_wait_ms: wait_ms }));
+        },
+      };
+    }
+
+    // Ready barrier before the first round: nobody starts a round (and its 60s timer) while the
+    // partner is still reading the recap or the walkthrough. A failure here is a no-match exit,
+    // as it was before practice existed.
+    const readyTrial = pairBarrierTrial("ready", {
+      heading: "Waiting for your partner to be ready…",
+      partner_not_ready:
+        "Your partner is still reading the instructions. The game will start as soon as they're done.",
+      partner_disconnected:
+        "Your partner seems to have lost their connection. We're waiting for them to come back.",
+      limit: `If the game can't start within ${readyMinutes} minutes, we'll end the study and still pay
+        you ${money(CONFIG.NO_MATCH_PAYMENT_USD)} for your time.`,
+    }, (result) => {
+      const waiting_ready = {
+        matched: "matched",
+        partner_left: "partner_left_before_start",
+        timeout: "partner_not_ready",
+      }[result];
+      if (waiting_ready !== "matched") noMatchReason = waiting_ready;
+      return { waiting_ready };
+    });
 
     // jsPsych evaluates conditional_function on timeline nodes, not plugin trials.
     // Skip readiness after failed pairing so its timeout cannot replace the original reason.
@@ -912,6 +1009,10 @@
       partner_id: () => partnerId,
       round: jsPsych.timelineVariable("round"),
       targets: jsPsych.timelineVariable("targets"), // one target, one click
+      // Which part of the game this round belongs to ("practice" or "main"), and its zero-based
+      // index within that part. Main rounds keep `round` 0..17; practice rounds have negative ones
+      // (Hawkins.phaseSchedules).
+      data: { phase: jsPsych.timelineVariable("phase"), phase_round: jsPsych.timelineVariable("phase_round") },
       scramble_mode: "disjoint",
       reveal_target_to: "director",
       // Unrestricted chat both ways. These are the defaults, stated because the effect depends on them.
@@ -946,12 +1047,21 @@
       // the original tells both roles they may "talk to the director", a copy-paste slip, so the
       // director's copy names the matcher.
       prompt: (role) => {
-        const finished = jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game" });
+        // Progress and score count this phase's rounds only, so both start again from zero for the
+        // main game after practice.
+        const phase = jsPsych.evaluateTimelineVariable("phase");
+        const finished = jsPsych.data.get().filter({ trial_type: "multiplayer-reference-game", phase });
         const score = finished.filter({ correct: true }).count();
         // The original's round number advances on every round, whatever the outcome.
         const roundNum = finished.count() + 1;
         // Separate progress, score and timer panels (hawkins-ui.js), then the round's result line.
-        const header = HawkinsUI.header({ round: roundNum, total: SCHEDULE.length, score, seconds: roundSeconds });
+        const header = HawkinsUI.header({
+          round: roundNum,
+          total: phase === "practice" ? PRACTICE_SCHEDULE.length : SCHEDULE.length,
+          score,
+          seconds: roundSeconds,
+          phase,
+        });
         const director =
           "Send messages to help the matcher pick the target image." +
           " You are free to use the chatbox to talk to the matcher at any time.";
@@ -1042,22 +1152,74 @@
         else if (data.multiplayer_outcome === "connection_lost") interruption = "connection_lost";
         if (interruption) {
           interruptedAtRound = data.round;
+          interruptedPhase = data.phase;
           jsPsych.abortCurrentTimeline();
         }
       },
     };
 
+    // Practice: the same round as the main game (roles, message gate, timer, presence check,
+    // feedback), on PRACTICE_SCHEDULE. An interruption here skips everything up to the terminal
+    // screen.
+    const practiceLoop = {
+      timeline: [gameRound],
+      timeline_variables: PRACTICE_SCHEDULE, // replaced in connectSession(), once the schedule exists
+      conditional_function: () => CONFIG.PRACTICE_ROUNDS > 0 && !noMatchReason && !reloaded && !interruption,
+    };
+
+    const mainTransition = {
+      timeline: [
+        continueScreen(
+          `<h2>Practice is over. The main game is next.</h2>
+           <p>You'll play ${totalRounds} trials together, in the same roles, with no breaks.</p>
+           <p>Progress and the number correct start again from zero.</p>
+           <p>When you continue, the main game starts as soon as your partner continues too.</p>`,
+          { instruction_screen: "main_transition" },
+        ),
+      ],
+      conditional_function: () => CONFIG.PRACTICE_ROUNDS > 0 && !noMatchReason && !reloaded && !interruption,
+    };
+
+    // The second pair barrier, before the main game. Its own flag, so the earlier `ready` flags can
+    // never release it. The pair has played together by now, so a failure here is a partner-dropped
+    // exit (Hawkins.exitFor): partner_left if the partner has left, or a neutral
+    // partner_not_ready_for_main if the time runs out.
+    const mainReadyTrial = pairBarrierTrial("ready_for_main", {
+      heading: "Waiting for your partner to start the main game…",
+      partner_not_ready:
+        "Your partner is still reading. The main game will start as soon as they continue.",
+      partner_disconnected:
+        "Your partner seems to have lost their connection. We're waiting for them to come back.",
+      limit: `If the main game can't start within ${readyMinutes} minutes, we'll end the study here.
+        Your payment is not affected.`,
+    }, (result) => {
+      if (result === "partner_left") interruption = "partner_left";
+      else if (result === "timeout") interruption = "partner_not_ready_for_main";
+      if (interruption) interruptedPhase = "main_ready";
+      return { waiting_ready_for_main: result };
+    });
+    mainReadyTrial.on_finish = () => saveProgress();
+
+    const mainReadyBarrier = {
+      timeline: [mainReadyTrial],
+      conditional_function: () => CONFIG.PRACTICE_ROUNDS > 0 && !noMatchReason && !reloaded && !interruption,
+    };
+
     const gameLoop = {
       timeline: [gameRound],
       timeline_variables: SCHEDULE, // replaced in connectSession(), once the schedule exists
-      conditional_function: () => !noMatchReason && !reloaded,
+      conditional_function: () => !noMatchReason && !reloaded && !interruption,
     };
 
     // ---- Terminal screen ------------------------------------------------------------------------
 
     function exitMessage(exit) {
       const played = playedRounds().count();
-      const progress = `<p>You completed ${played} of ${SCHEDULE.length} rounds together.</p>`;
+      // Practice rounds are not main-game rounds, so an exit before the main game says that
+      // rather than "0 of 18".
+      const progress = played === 0 && (interruptedPhase === "practice" || interruptedPhase === "main_ready")
+        ? `<p>This happened before the main game started.</p>`
+        : `<p>You completed ${played} of ${SCHEDULE.length} rounds together.</p>`;
       switch (exit) {
         case "reloaded":
           return `<h2>This page was reloaded</h2>
@@ -1088,6 +1250,12 @@
           return `<h2>We lost the connection to the game</h2>
             <p>Your connection to the game server dropped and did not come back, so we have ended
                the study here. <strong>Your payment is not affected.</strong></p>
+            ${progress}`;
+        case "partner_not_ready_for_main":
+          return `<h2>We couldn't start the main game together</h2>
+            <p>Your partner didn't continue to the main game in time, so we have ended the study
+               here. They may have left or had connection trouble. Either way, it is nothing to do
+               with you. <strong>Your payment is not affected.</strong></p>
             ${progress}`;
         case "complete": {
           const correct = completedRounds().filter({ correct: true }).count();
@@ -1205,21 +1373,46 @@
 
       if (jsPsych.multiplayer.restarted) {
         reloaded = true;
+        // A tab reloaded at a pair barrier still has its ready flags from before the reload, and
+        // is briefly connected again before it leaves; withdraw them so the partner cannot start on
+        // them alone.
+        try {
+          Promise.resolve(
+            jsPsych.multiplayer.update({ ready: false, ready_for_main: false }, { scope: "session" }),
+          ).catch(() => {});
+        } catch {
+          // The partner's barrier still requires this participant to stay connected.
+        }
         return { connection: "restarted" };
       }
 
-      SCHEDULE = Hawkins.sequentialSchedule(
-        CONFIG.BLOCKS,
-        SHAPES.map((s) => s.id),
-        (key, array) => jsPsych.multiplayer.shuffle(key, array),
-        CONFIG.TARGETS_PER_BLOCK,
-      );
-      // jsPsych reads a timeline's timeline_variables when that timeline starts, so setting it here,
-      // before the game loop is reached, takes effect.
+      const ids = SHAPES.map((s) => s.id);
+      const shuffle = (key, array) => jsPsych.multiplayer.shuffle(key, array);
+      try {
+        // Both partners draw the same main and practice targets from the session's shared
+        // randomness; practice targets are the tangrams the main schedule leaves out.
+        const phases = Hawkins.phaseSchedules(
+          Hawkins.sequentialSchedule(CONFIG.BLOCKS, ids, shuffle, CONFIG.TARGETS_PER_BLOCK),
+          ids,
+          CONFIG.PRACTICE_ROUNDS,
+          shuffle,
+        );
+        SCHEDULE = phases.main;
+        PRACTICE_SCHEDULE = phases.practice;
+      } catch (error) {
+        // A misconfigured schedule (e.g. more practice rounds than unassigned tangrams).
+        console.error("Could not build the trial schedule", error);
+        noMatchReason = "schedule_error";
+        return { connection: "connected", schedule_error: String(error?.message ?? error) };
+      }
+      // jsPsych reads a timeline's timeline_variables when that timeline starts, so setting them
+      // here, before the loops are reached, takes effect.
       gameLoop.timeline_variables = SCHEDULE;
+      practiceLoop.timeline_variables = PRACTICE_SCHEDULE;
       jsPsych.data.addProperties({
         config_trials: SCHEDULE.length,
         assigned_target_ids: SCHEDULE.slice(0, CONFIG.TARGETS_PER_BLOCK).map((trial) => trial.targets[0]).sort(),
+        practice_target_ids: PRACTICE_SCHEDULE.map((trial) => trial.targets[0]),
       });
       return { connection: "connected" };
     }
@@ -1257,7 +1450,11 @@
         waitingRoom,
         pairingPhase,
         roleRecap,
+        interfaceWalkthrough,
         readyBarrier,
+        practiceLoop,
+        mainTransition,
+        mainReadyBarrier,
         gameLoop,
         terminalScreen,
       ]);

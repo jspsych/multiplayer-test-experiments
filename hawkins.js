@@ -29,6 +29,102 @@
     return rounds;
   }
 
+  // Practice rounds before the main game (ported from PR #41 by @htsukamoto5). Returns
+  // { practice, main }: `count` practice rounds, each targeting a different tangram that is NOT in
+  // `main`, drawn with the same session-seeded `shuffle` so both partners practice with the same
+  // shapes, and the main schedule with explicit phase fields.
+  //
+  // `round` must be unique across the session (the plugin seeds each round's layouts with it and
+  // tags that round's chat with it), and main rounds keep `round` 0..n-1 so existing analysis is
+  // unaffected. So practice rounds count up to -1: with two, practice is round -2 then -1, and
+  // sorting by `round` still gives play order. `phase_round` is the zero-based index within a
+  // phase. Asking for more practice rounds than there are unassigned tangrams throws rather than
+  // using main targets for practice.
+  function phaseSchedules(main, ids, count, shuffle) {
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError("The number of practice rounds must be a nonnegative integer");
+    }
+    const assigned = new Set(main.flatMap((r) => r.targets));
+    const excluded = ids.filter((id) => !assigned.has(id));
+    if (count > excluded.length) {
+      throw new RangeError(
+        `${count} practice rounds need ${count} tangrams outside the main schedule; there are ${excluded.length}`,
+      );
+    }
+    const targets = count ? shuffle("schedule-practice-targets", excluded).slice(0, count) : [];
+    return {
+      practice: targets.map((id, i) => ({ round: i - count, phase: "practice", phase_round: i, targets: [id] })),
+      main: main.map((r) => ({ ...r, phase: "main", phase_round: r.round })),
+    };
+  }
+
+  // ---- Pair barrier ---------------------------------------------------------------------------
+
+  // Holds this participant until both pair members are connected and have set `flag` in session
+  // scope, so the pair starts the next part together. The page uses it before practice (`ready`)
+  // and again before the main game (`ready_for_main`); a separate flag per barrier means a stale
+  // flag from an earlier barrier can never release a later one. A plain poll rather than the
+  // multiplayer-sync plugin: core wait() rejects when a participant leaves, and that rejection has
+  // no handler inside a plugin trial, while here every outcome lands on exactly one result.
+  //   • A partner who has left ends the wait at once: "partner_left".
+  //   • Only the two pair members count, and only while connected. A disconnected partner, or
+  //     unreadable state, never counts as ready: the wait fails closed and the deadline bounds it.
+  //   • On timeout this side withdraws its flag before leaving, so a partner who becomes ready at
+  //     the deadline is less likely to start alone on a stale flag: "timeout".
+  // `onWaiting(status)` runs on each poll that does not finish the wait, so the page can say what
+  // it is waiting for: "partner_disconnected" when the partner's presence is "away" (the core's
+  // status for a participant whose connection dropped but who does not yet count as gone; it
+  // becomes "left" after the dropout timeout), else "partner_not_ready". `done({ result, wait_ms })`
+  // runs exactly once, with "matched", "partner_left" or "timeout".
+  function waitForPair(multiplayer, { self, partner, flag, timeoutMs, onWaiting = () => {}, pollMs = 500 }, done) {
+    const startedAt = Date.now();
+    let finished = false;
+    const setFlag = (value) => {
+      // Merge, not replace: the role trial stored session-scope fields (e.g. joinedAt) that a
+      // replace would wipe. Guarded both ways so a failed write can never skip the ticker.
+      try {
+        Promise.resolve(multiplayer.update({ [flag]: value }, { scope: "session" })).catch(() => {});
+      } catch {
+        // Synchronous failure (e.g. closed session): the deadline still ends the wait.
+      }
+    };
+    const finish = (result) => {
+      if (finished) return;
+      finished = true;
+      clearInterval(ticker);
+      done({ result, wait_ms: Date.now() - startedAt });
+    };
+    const ticker = setInterval(() => {
+      let status = "partner_not_ready";
+      try {
+        const state = multiplayer.getAll({ scope: "session" }) ?? {};
+        const presence = multiplayer.presence() ?? {};
+        if (presence[partner] === "left") {
+          finish("partner_left");
+          return;
+        }
+        if ([self, partner].every((id) => id && presence[id] === "connected" && state[id]?.[flag] === true)) {
+          finish("matched");
+          return;
+        }
+        if (presence[partner] === "away") status = "partner_disconnected";
+      } catch {
+        // Unreadable state must not release the barrier; the deadline still bounds the wait.
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        setFlag(false);
+        finish("timeout");
+        return;
+      }
+      try {
+        onWaiting(status);
+      } catch {
+        // A display error must not stop the wait.
+      }
+    }, pollMs);
+    setFlag(true);
+  }
+
   // ---- Timed-out rounds -----------------------------------------------------------------------
 
   const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -147,14 +243,22 @@
   // Every session ends on exactly one terminal screen. `state` is:
   //   reloaded      true when this page load is a restart of an earlier one (restarted)
   //   noMatchReason set when the participant never got a partner (lobby, pairing, connect errors)
-  //   interruption  set when a game in progress ended early: "partner_left" or "connection_lost".
-  //                 Timeouts never end the game, so there is no inactivity exit.
+  //   interruption  set when a game in progress ended early: "partner_left" or "connection_lost"
+  //                 during a practice or main round, or at the barrier between them,
+  //                 "partner_left" or "partner_not_ready_for_main". Timeouts never end the game, so
+  //                 there is no inactivity exit.
+  //
+  // Both barrier exits after practice pay the partner_dropped code, not no_match: the pair was
+  // matched and played practice rounds together, so the participant has spent far longer than the
+  // lobby wait the no-match payment covers, and was stranded by the partner, as in a game that
+  // ends mid-way. The barrier before practice stays a no-match exit (noMatchReason), as before.
   // Returns the exit name and the completion-code key it pays.
   const EXIT_CODES = {
     reloaded: "reloaded",
     no_match: "no_match",
     partner_left: "partner_dropped",
     connection_lost: "partner_dropped",
+    partner_not_ready_for_main: "partner_dropped",
     complete: "complete",
   };
 
@@ -246,6 +350,8 @@
 
   global.Hawkins = {
     sequentialSchedule,
+    phaseSchedules,
+    waitForPair,
     idleRole,
     classifyRound,
     DEADLINE_COUNT_KEY,

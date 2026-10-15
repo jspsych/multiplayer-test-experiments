@@ -13,11 +13,13 @@
   // The round header: trial progress, number correct and time remaining in separate panels, then
   // the line that carries the round's result ("Correct!", "Incorrect." or "Time's up! …").
   // `score` is the count of saved `correct: true` rows before this round; `result` adds the current
-  // round on top of it.
-  function header({ round, total, score, seconds }) {
+  // round on top of it. In practice (`phase: "practice"`) the panels say so, and count practice
+  // rounds only; the page resets both for the main game.
+  function header({ round, total, score, seconds, phase = "main" }) {
+    const practice = phase === "practice";
     return `<div class="hk-status">
-      <div class="hk-stat"><span>Progress</span><strong>Trial ${round} of ${total}</strong></div>
-      <div class="hk-stat"><span>Number correct</span><strong id="hk-score" data-score="${score}">${score}</strong></div>
+      <div class="hk-stat"><span>${practice ? "Practice" : "Progress"}</span><strong>${practice ? "Round" : "Trial"} ${round} of ${total}</strong></div>
+      <div class="hk-stat"><span>${practice ? "Practice correct" : "Number correct"}</span><strong id="hk-score" data-score="${score}">${score}</strong></div>
       <div class="hk-stat hk-timer"><span>Time remaining</span><strong id="round-remaining">${seconds}s</strong><small id="hk-time-hint"></small></div>
     </div>
     <p id="round-note" class="hk-round-note" aria-live="polite"></p>`;
