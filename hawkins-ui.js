@@ -92,5 +92,24 @@
     if (score) score.textContent = String(Number(score.dataset.score) + (kind === "correct" ? 1 : 0));
   }
 
-  global.HawkinsUI = { header, chat, timer, result };
+  // Focus once per round, after send permissions/readiness enable the input. Return a disposer
+  // so an unfinished readiness wait cannot focus a later trial. Never refocus on chat updates.
+  function focusDirectorChat(display, role) {
+    const stop = () => observer?.disconnect();
+    let observer = null;
+    if (role !== "director") return stop;
+    const input = display.querySelector(`${P}-chat-input`);
+    if (!input) return stop;
+    const focusIfReady = () => {
+      if (!input.isConnected || input.disabled) return;
+      stop();
+      input.focus({ preventScroll: true });
+    };
+    observer = new MutationObserver(focusIfReady);
+    observer.observe(input, { attributes: true, attributeFilter: ["disabled"] });
+    focusIfReady();
+    return stop;
+  }
+
+  global.HawkinsUI = { header, chat, timer, result, focusDirectorChat };
 })(typeof globalThis !== "undefined" ? globalThis : this);

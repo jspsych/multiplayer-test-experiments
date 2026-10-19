@@ -1000,6 +1000,7 @@
     // Shares, and on the director receives, how many director messages had reached the matcher by
     // the deadline (Hawkins.createDeadlineWitness). Replaced every round in on_load.
     let deadlineWitness = null;
+    let stopChatFocus = () => {};
     const gameRound = {
       type: jsPsychMultiplayerReferenceGame,
       stimuli: SHAPES,
@@ -1078,6 +1079,9 @@
         // trial ends. A submission the selection_timeout made carries `timed_out: true`.
         const display = jsPsych.getDisplayElement();
         HawkinsUI.chat(display, myRole);
+        // Synchronous plugin setup enables chat before on_load. Also tolerate plugins that
+        // keep it disabled until shared round readiness; focus only once it becomes usable.
+        stopChatFocus = HawkinsUI.focusDirectorChat(display, myRole);
         const remaining = document.getElementById("round-remaining");
         const deadline = Date.now() + CONFIG.ROUND_TIMEOUT_MS;
         // The result shown is scored from the submitted assignment against this round's targets, as
@@ -1137,6 +1141,7 @@
         roundCountdownInterval = countdownInterval;
       },
       on_finish: (data) => {
+        stopChatFocus();
         clearInterval(roundCountdownInterval);
         roundCountdownInterval = null;
         // feedback_shown and timeout_source come from the plugin's data (see classifyRound), not
