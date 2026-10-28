@@ -1017,6 +1017,9 @@
       reveal_target_to: "director",
       // Unrestricted chat both ways. These are the defaults, stated because the effect depends on them.
       chat_role: "both",
+      chat_autofocus: () => myRole === "director",
+      // After the Director clicks elsewhere mid-round, typing still goes into the chat box.
+      chat_type_to_focus: () => myRole === "director",
       max_messages: null,
       max_length: null,
       require_message_before_response: true,

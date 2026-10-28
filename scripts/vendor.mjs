@@ -20,11 +20,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// jspsych/jspsych-multiplayer main after #107 (the 1.0 API: trial scopes, multiplayer_outcome,
-// MultiplayerError codes, `restarted`).
-const MULTIPLAYER_COMMIT = "f6b359e30b45cd1edf3a28cfcb7bafc665b818ef";
+// Exact head of jspsych/jspsych-multiplayer PR #123 (opt-in chat_autofocus and chat_type_to_focus).
+// Provisional adoption: upstream PR is still draft; review before merging this pin.
+const MULTIPLAYER_COMMIT = "cafeb36a21782df925972006dc8a77ea52a36e35";
 // The jsPsych#3694 preview build that commit's examples and vendored core are pinned to.
-const JSPSYCH_PREVIEW = "4df7fbb672806086c7e118e53aba2262f27edf68";
+const JSPSYCH_PREVIEW = "1e77da41966f22832ee0d133d137d81b3e50639a";
 const JSPSYCH_PLUGINS = {
   "plugin-html-keyboard-response": "2.2.0",
   "plugin-preload": "2.1.0",
