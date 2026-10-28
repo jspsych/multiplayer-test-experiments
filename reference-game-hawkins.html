@@ -94,6 +94,42 @@
         background: #1971c2;
       }
 
+      /* ONE-SCREEN LAYOUT. The round, and the walkthrough's preview of it, fit a 1280×720 window
+         without scrolling: the chat sits beside the grid (`chat_position: "beside"`), and the header
+         panels are a single compact row. The plugin injects its own `is-beside` rules when the first
+         round starts; these repeat the ones the preview needs before then and set the chat column's
+         size, which the plugin leaves at 18em. */
+      .jspsych-multiplayer-reference-game.is-beside .jspsych-multiplayer-reference-game-main {
+        display: flex;
+        flex-direction: row;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 20px;
+      }
+      .jspsych-multiplayer-reference-game.is-beside .jspsych-multiplayer-reference-game-chat {
+        display: flex;
+        flex-direction: column;
+        flex: none;
+        width: 340px;
+        height: 380px;
+      }
+      .jspsych-multiplayer-reference-game.is-beside .jspsych-multiplayer-reference-game-chat .hk-conversation {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .jspsych-multiplayer-reference-game.is-beside .jspsych-multiplayer-reference-game-chat-log {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+        margin-bottom: 0;
+        font-size: 16px;
+        line-height: 1.4;
+      }
+      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-prompt p {
+        margin: 6px 0;
+      }
+
       /* ROUND HEADER (hawkins-ui.js): trial progress, number correct and time remaining in separate
          panels. The timer panel turns amber with a warning in the round's last
          CONFIG.TIMER_WARNING_SECONDS. */
@@ -101,26 +137,28 @@
         display: flex;
         flex-wrap: wrap;
         gap: 12px;
-        margin: 12px 0;
+        margin: 8px 0;
         text-align: left;
       }
       .hk-stat {
         flex: 1;
         min-width: 140px;
-        padding: 10px 16px;
+        padding: 4px 14px;
         border: 1px solid #cbd5e1;
         border-radius: 8px;
         background: #f8fafc;
+        line-height: 1.3;
       }
-      .hk-stat span,
-      .hk-stat small {
+      .hk-stat span {
         display: block;
-        font-size: 15px;
+        font-size: 14px;
+      }
+      .hk-stat small {
+        margin-left: 10px;
+        font-size: 14px;
       }
       .hk-stat strong {
-        display: block;
-        font-size: 26px;
-        line-height: 1.35;
+        font-size: 22px;
       }
       .hk-timer {
         background: #eaf2ff;
@@ -131,7 +169,6 @@
         border-color: #9c5400;
       }
       #hk-time-hint {
-        min-height: 1.3em;
         font-weight: bold;
       }
 
@@ -139,8 +176,8 @@
          "Time's up! …". A timeout is amber, not the red of an incorrect choice. */
       .hk-round-note {
         min-height: 1.35em;
-        margin: 0.2em 0;
-        font-size: 24px;
+        margin: 0;
+        font-size: 22px;
         font-weight: bold;
       }
       .hk-round-note.is-correct {
@@ -158,14 +195,19 @@
          the prompt already names the role. */
       .hk-chat-label {
         display: block;
-        margin-top: 16px;
-        font-size: 20px;
+        margin: 0 0 4px;
+        font-size: 17px;
         font-weight: bold;
+        line-height: 1.3;
         text-align: left;
       }
+      label.hk-chat-label {
+        margin-top: 8px;
+      }
       .hk-chat-help {
-        margin: 4px 0 8px;
-        font-size: 16px;
+        margin: 0 0 6px;
+        font-size: 14px;
+        line-height: 1.35;
         text-align: left;
       }
       .hk-conversation {
@@ -190,7 +232,8 @@
         min-height: 60px;
       }
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-input {
-        padding: 12px;
+        min-width: 0;
+        padding: 10px;
         border: 2px solid #315c9e;
         border-radius: 6px;
         background: #fff;
@@ -201,7 +244,7 @@
         outline-offset: 2px;
       }
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-chat-send {
-        padding: 12px 20px;
+        padding: 10px 16px;
         border-radius: 6px;
         background: #234f90;
         color: #fff;
@@ -248,24 +291,32 @@
          the preview's grid and chat are styled here. */
       .hk-walk-copy {
         max-width: 44em;
-        margin: 0 auto 20px;
-        line-height: 1.45;
+        margin: 0 auto 8px;
+        line-height: 1.4;
+      }
+      .hk-walk-copy h2 {
+        margin: 0 0 4px;
+        font-size: 22px;
       }
       .hk-walk-copy h2:focus {
         outline: none;
       }
+      .hk-walk-copy p {
+        margin: 0 0 8px;
+      }
       .hk-walk-step {
-        margin-bottom: 0;
         color: #58606b;
         font-size: 15px;
       }
       .hk-walk-copy button {
-        padding: 10px 20px;
+        padding: 8px 20px;
         font: inherit;
       }
       .hk-preview-grid {
         display: grid;
-        grid-template-columns: repeat(6, minmax(0, 130px));
+        /* The round's grid: six columns at the round's cell_size. */
+        grid-template-columns: repeat(6, 130px);
+        flex: none;
         gap: 8px;
         justify-content: center;
       }
@@ -278,6 +329,9 @@
         box-shadow: 0 0 0 2px #e5a000;
       }
       .hk-preview-chat .jspsych-multiplayer-reference-game-chat-log {
+        padding: 0.5em 0.75em;
+        overflow-y: auto;
+        text-align: left;
         border: 1px solid #ccc;
         border-radius: 6px;
       }
@@ -289,8 +343,10 @@
         flex: 1;
         min-width: 0;
       }
-      .hk-walkthrough [hidden] {
-        display: none !important;
+      /* Parts of the preview not shown yet keep their space, so the screen does not jump between
+         steps (hawkins-onboarding.js marks them). */
+      .hk-walkthrough .hk-walk-preview .is-pending {
+        visibility: hidden;
       }
 
       /* "Partner is typing…" hint from the plugin's `typing_indicator`. The original has one too
@@ -346,11 +402,12 @@
     //      matcher's own, so a matcher could unlock their click by typing. The plugin counts only the
     //      partner's message, which is the stricter reading and, judging by the source comment, the
     //      intended one.
-    //   4. Short general instructions before the lobby, and a role recap after pairing.
+    //   4. Short general instructions covering both roles before the lobby, and a one-sentence role
+    //      reminder after pairing.
     //      A comprehension check repeats with corrective feedback before the lobby. The page
     //      connects to the multiplayer session only after both, so nobody is paired while still
     //      reading.
-    //   5. After the role recap, a role-specific walkthrough of the game screen, then two paired
+    //   5. After the role reminder, a role-specific walkthrough of the game screen, then two paired
     //      practice rounds on tangrams that are not targets in the dyad's main schedule. Practice
     //      rows are saved with `phase: "practice"` and never count toward the main game
     //      (WALKTHROUGH-PRACTICE.md).
@@ -609,9 +666,9 @@
         async: true,
         func: (done) => {
           jsPsych.getDisplayElement().innerHTML = `
-            <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
+            <div style="max-width: 40em; margin: 1em auto; text-align: center; line-height: 1.45;">
               ${html}
-              <p style="margin-top: 1.5em; text-align: center;">
+              <p style="margin-top: 1.2em; text-align: center;">
                 <button type="button" id="continue-instructions">Continue</button>
               </p>
             </div>`;
@@ -622,39 +679,29 @@
 
     const totalRounds = CONFIG.BLOCKS * CONFIG.TARGETS_PER_BLOCK;
     const roundSeconds = Math.round(CONFIG.ROUND_TIMEOUT_MS / 1000);
+    // Both roles are explained here, before pairing; after pairing, each participant only gets a
+    // one-sentence reminder of their role (roleRecap).
     const generalInstructions = continueScreen(
       `<h2>How this study works</h2>
-       <p>You'll be paired with another participant for a real-time task. One of you will be the
-          <strong>Director</strong> and the other will be the <strong>Matcher</strong> (assigned at
-          random, and fixed for the whole game).</p>
-       <p><strong>Goal:</strong> The Director sees one highlighted shape in a lineup of ${SHAPES.length}
-          abstract shapes (tangrams) and describes it in the chat. The Matcher, who can't see the
-          highlight, tries to click that shape.</p>
-       <p><strong>Each round:</strong></p>
+       <p>You'll play a real-time game with another participant. One of you is the
+          <strong>Director</strong> and the other the <strong>Matcher</strong>, chosen at random.
+          Roles stay the same for the whole game.</p>
        <ul style="text-align: left; display: inline-block; margin: 0 auto;">
-         <li>The target is outlined in yellow, but only on the Director's screen.</li>
-         <li>Both of you can chat freely (chat box below the shapes), but the Director must send
-             at least one message before the Matcher can choose.</li>
-         <li>The shapes are arranged differently on your two screens. Describe the shape itself,
-             rather than its position.</li>
-         <li>You have ${roundSeconds} seconds to describe and pick a tangram. A countdown on every
-             trial shows the time remaining and warns you in the last
-             ${CONFIG.TIMER_WARNING_SECONDS} seconds. If time runs out before the Matcher picks, you
-             both see a "Time's up" message (the Matcher also sees the correct shape), then move on
-             to the next trial.</li>
-         <li>If you're inactive for a while, a message will ask you to click a button to show
-             you're still with us.</li>
-         <li>After the choice, you both see "Correct!" or "Incorrect." The correct shape is outlined
-             in green on the Matcher's screen. If the Matcher picked a different one, their pick is
-             outlined in blue.</li>
+         <li>You both see the same ${SHAPES.length} abstract shapes, arranged differently on each
+             screen.</li>
+         <li><strong>Director:</strong> one shape is outlined in yellow, only on your screen.
+             Describe it in the chat (the shape itself, not its position).</li>
+         <li><strong>Matcher:</strong> click the shape the Director means. You can choose once
+             they've sent a message, and you can ask questions in the chat.</li>
+         <li>Each round has ${roundSeconds} seconds. Then you both see the result and move on.</li>
+         <li>If you're inactive for a while, we'll check that you're still there.</li>
        </ul>
        <p>${CONFIG.PRACTICE_ROUNDS
-         ? `After you're paired, we'll show you the game screen, and you'll play
-            ${CONFIG.PRACTICE_ROUNDS} practice rounds together. Then the main game has
-            ${totalRounds} trials, with no breaks. Practice doesn't count toward your score.`
-         : `There are ${totalRounds} trials, with no breaks.`}</p>
-       <p>${CONFIG.COMPREHENSION_CHECK ? "Next, answer three quick questions about the task. Then you" : "Next you"}
-          will wait to be paired with a partner.</p>`,
+         ? `After ${CONFIG.PRACTICE_ROUNDS} practice rounds, the main game has ${totalRounds}
+            trials, with no breaks.`
+         : `The game has ${totalRounds} trials, with no breaks.`}
+          ${CONFIG.COMPREHENSION_CHECK ? "First, three quick questions. Then" : "Next"} we'll pair you
+          with a partner.</p>`,
       { instruction_screen: "general" },
     );
 
@@ -694,11 +741,11 @@
             const startedAt = performance.now();
             comprehensionAttempt += 1;
             const display = jsPsych.getDisplayElement();
-            display.innerHTML = `<form id="comprehension-form" style="max-width:40em;margin:2em auto;text-align:left;line-height:1.5">
+            display.innerHTML = `<form id="comprehension-form" style="max-width:40em;margin:1em auto;text-align:left;line-height:1.4">
               <h2>Check your understanding</h2>
               <p>Please answer all three questions. If you miss one, we'll explain it and you can try again.</p>
-              ${comprehensionQuestions.map((q) => `<fieldset style="margin:1em 0"><legend>${q.title}</legend>
-                ${jsPsych.randomization.shuffle(q.choices).map((choice) => `<label style="display:block;padding:0.3em">
+              ${comprehensionQuestions.map((q) => `<fieldset style="margin:0.6em 0"><legend>${q.title}</legend>
+                ${jsPsych.randomization.shuffle(q.choices).map((choice) => `<label style="display:block;padding:0.15em 0.3em">
                   <input type="radio" name="${q.name}" value="${q.choices.indexOf(choice)}" required> ${choice}</label>`).join("")}
               </fieldset>`).join("")}
               <button type="submit">Check answers</button></form>`;
@@ -843,34 +890,16 @@
           type: jsPsychCallFunction,
           async: true,
           func: (done) => {
+            // One sentence: the general instructions have already explained both roles.
             const directorCopy = `
               <h2>You are the Director</h2>
-              <p>Each round, one tangram (an abstract shape) is outlined in <strong>yellow</strong> on
-                 your screen. <strong>Only you can see it</strong> — your partner can't. Describe that
-                 shape so your partner can pick it out of the lineup of ${SHAPES.length}.</p>
-              <p>Use the <strong>chat box below the shapes</strong>. You <strong>must send at least one
-                 message every round</strong> — your partner can't click until you do.</p>
-              <p>After each choice you'll see your partner's pick outlined in green. Green on your
-                 screen marks their pick, not necessarily the right answer. The message above the
-                 shapes says <strong>Correct!</strong> or <strong>Incorrect.</strong></p>
-              <p>You will stay the <strong>Director for the whole game</strong>.
-                 Roles do not switch.</p>`;
+              <p>Describe the shape outlined in yellow so the Matcher can pick it; you'll keep this
+                 role for the whole game.</p>`;
             const matcherCopy = `
               <h2>You are the Matcher</h2>
-              <p>You will see ${SHAPES.length} tangrams (abstract shapes). The Director sees one of them
-                 outlined in <strong>yellow</strong>, but that highlight appears <strong>only on their
-                 screen</strong>, so go by their description to <strong>click the one</strong> you think
-                 they mean.</p>
-              <p>If clicking does nothing at first, that's expected. The shapes unlock as soon as the
-                 Director sends a message (they must send at least one every round). You can use the
-                 <strong>chat box below the shapes</strong> throughout, including asking questions if a
-                 description is unclear.</p>
-              <p>After you choose, a <strong>green</strong> outline marks the correct shape. If you picked
-                 a different one, your click is marked in <strong>blue</strong>.</p>
-              <p>You will stay the <strong>Matcher for the whole game</strong>.
-                 Roles do not switch.</p>`;
+              <p>Click the shape the Director describes; you'll keep this role for the whole game.</p>`;
             jsPsych.getDisplayElement().innerHTML = `
-              <div style="max-width: 40em; margin: 2em auto; text-align: center; line-height: 1.45;">
+              <div style="max-width: 40em; margin: 1em auto; text-align: center; line-height: 1.45;">
                 ${myRole === "director" ? directorCopy : matcherCopy}
                 <p style="margin-top: 1.5em; text-align: center;">
                   <button type="button" id="continue-instructions">Continue</button>
@@ -1005,6 +1034,8 @@
       stimuli: SHAPES,
       columns: 6, // 6×2 grid, as in the original
       cell_size: 130, // square cells, like the original's 300px ones (see the <style> block)
+      // Chat to the right of the grid, so the whole round fits a 1280×720 window without scrolling.
+      chat_position: "beside",
       role: () => myRole,
       partner_id: () => partnerId,
       round: jsPsych.timelineVariable("round"),
