@@ -185,7 +185,7 @@ function mainGame({ rows = [] } = {}) {
   });
   vm.runInContext(sessionLogic, context);
   vm.runInContext(
-    "let noMatchReason = null, reloaded = false, interruption = null, interruptedAtRound = null,\n" +
+    "let noMatchReason = null, reloaded = false, interruption = null, removalReason = null, interruptedAtRound = null,\n" +
       "  interruptedPhase = null, outcome = null, participantId = 'me', partnerId = 'them';\n" +
       between("    const completedRounds =", "    // ---- Saving") +
       between("    const readyMinutes =", "    // Ready barrier before the first round") +

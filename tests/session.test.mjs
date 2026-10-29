@@ -191,19 +191,26 @@ test("gated matcher clicks are counted from the matcher's interaction history", 
   assert.equal(classifyRound({ role: "director", multiplayer_outcome: "timeout" }).matcher_gated_clicks, null);
 });
 
-test("there is no inactivity exit or completion code any more", () => {
+test("the only inactivity exit is the removed participant's own; the partner takes partner_left", () => {
+  // The older idle-round exits (removed in #36) stay gone.
   for (const exit of ["inactive_self", "inactive_partner"]) {
     assert.throws(() => exitFor({ reloaded: false, noMatchReason: null, interruption: exit }), /Unknown exit/);
   }
-  assert.equal(Object.values(EXIT_CODES).includes("inactive"), false);
+  assert.deepEqual(
+    exitFor({ reloaded: false, noMatchReason: null, interruption: "removed_inactive" }),
+    { exit: "removed_inactive", codeKey: "removed_inactive" },
+  );
+  assert.equal(EXIT_CODES.partner_left, "partner_dropped");
   const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
-  assert.doesNotMatch(html, /inactive_self|inactive_partner|\binactive:|"inactive"/);
+  assert.doesNotMatch(html, /inactive_self|inactive_partner|"inactive"/);
 });
 
 test("the page never ends the game on a timeout", () => {
   const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /IDLE_ROUNDS|idleTracker|interruption = "inactive_/);
   assert.match(html, /selection_timeout: CONFIG\.ROUND_TIMEOUT_MS/);
+  // Only the presence check's on_expire sets the removal.
+  assert.equal(html.match(/interruption = "removed_inactive"/g)?.length, 1);
 });
 
 // ---- Exit routing -------------------------------------------------------------------------------
@@ -219,6 +226,9 @@ test("every session state lands on exactly one exit", () => {
     [{ reloaded: false, noMatchReason: "partner_not_ready", interruption: null }, "no_match", "no_match"],
     [{ reloaded: false, noMatchReason: null, interruption: "partner_left" }, "partner_left", "partner_dropped"],
     [{ reloaded: false, noMatchReason: null, interruption: "connection_lost" }, "connection_lost", "partner_dropped"],
+    [{ reloaded: false, noMatchReason: null, interruption: "removed_inactive" }, "removed_inactive", "removed_inactive"],
+    // A reload wins over a removal, as over every other state.
+    [{ reloaded: true, noMatchReason: null, interruption: "removed_inactive" }, "reloaded", "reloaded"],
     [{ reloaded: false, noMatchReason: null, interruption: null }, "complete", "complete"],
   ];
   for (const [state, exit, codeKey] of cases) {

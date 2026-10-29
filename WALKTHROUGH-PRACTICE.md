@@ -17,7 +17,7 @@ After pairing, each participant sees:
 3. **Ready barrier** (flag `ready`). Unchanged except for its time limit and its waiting message,
    below. A failure here is still a no-match exit.
 4. **Practice**: `CONFIG.PRACTICE_ROUNDS` paired rounds (default 2). They run the main game's round
-   unchanged: same roles, message gate, 60s timer and warning, presence check, `classifyRound`
+   unchanged: same roles, message gate, round timer and warning, presence check, `classifyRound`
    fields, deadline witness and "Correct!" / "Incorrect." / "Time's up!" feedback. The header reads
    "Practice: Round 1 of 2" and "Practice correct". `PRACTICE_ROUNDS: 0` turns practice off, along
    with the transition and the second barrier.
@@ -116,6 +116,6 @@ and `{ waiting_ready_for_main, ready_wait_ms }`, with `waiting_ready_for_main` o
 
 ## Time and payment
 
-The walkthrough, two timed practice rounds (up to 2 × 60s plus 3s of feedback each), the transition
+The walkthrough, two timed practice rounds (up to 2 × 3 minutes plus 3s of feedback each), the transition
 screen and up to two barrier waits (each now up to 3 minutes) add to the session. The advertised
 duration and the reward (DECISIONS.md B1, B5) need to include that time.
