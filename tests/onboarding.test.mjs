@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import "../hawkins.js";
+import "../hawkins-ui.js";
 import "../hawkins-onboarding.js";
 
 const { phaseSchedules, sequentialSchedule, exitFor } = globalThis.Hawkins;
@@ -294,7 +295,8 @@ test("the walkthrough has seven role-specific steps", () => {
   assert.equal(matcher.length, 7);
   assert.notDeepEqual(director[1], matcher[1]);
   assert.match(director[1][1], /yellow/);
-  assert.match(director[3][1], /60 seconds/);
+  assert.match(director[3][1], /Each round has 1 minute\./);
+  assert.match(HawkinsOnboarding.steps({ role: "director", seconds: 180, practiceRounds: 2 })[3][1], /Each round has 3 minutes\./);
   assert.match(director[6][1], /2 practice rounds/);
   assert.doesNotMatch(HawkinsOnboarding.steps({ role: "matcher", seconds: 60, practiceRounds: 0 })[6][1], /practice/);
 });

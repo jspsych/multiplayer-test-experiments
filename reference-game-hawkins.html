@@ -620,7 +620,7 @@
              at least one message before the Matcher can choose.</li>
          <li>The shapes are arranged differently on your two screens. Describe the shape itself,
              rather than its position.</li>
-         <li>You have ${roundSeconds} seconds to describe and pick a tangram. A countdown on every
+         <li>You have ${HawkinsUI.duration(roundSeconds)} to describe and pick a tangram. A countdown on every
              trial shows the time remaining and warns you in the last
              ${CONFIG.TIMER_WARNING_SECONDS} seconds. If time runs out before the Matcher picks, you
              both see a "Time's up" message (the Matcher also sees the correct shape), then move on
@@ -1124,7 +1124,7 @@
           const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
           HawkinsUI.timer(display, seconds, CONFIG.TIMER_WARNING_SECONDS, result === null);
           if (result === null) {
-            remaining.textContent = `${seconds}s`;
+            remaining.textContent = HawkinsUI.clock(seconds);
           } else if (result !== "timeout") {
             remaining.textContent = "Selection complete";
             // The score panel becomes the saved count plus this round, if it was correct.

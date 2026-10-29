@@ -24,7 +24,7 @@
         ? "Type a description and press Send (or Enter). You must send at least one message each round before your partner can choose."
         : "Use this box to ask questions. You can choose a shape once the Director has sent a message in that round."],
       ["Time remaining",
-        `Each round has ${seconds} seconds. The timer counts down only during a round. If time runs out, you both see "Time's up!" and move on; it is not scored as a wrong choice.`],
+        `Each round has ${global.HawkinsUI.duration(seconds)}. The timer counts down only during a round. If time runs out, you both see "Time's up!" and move on; it is not scored as a wrong choice.`],
       ["Number correct",
         `This goes up after each correct choice. After every choice you also see "Correct!" or "Incorrect."${practiceRounds ? " Practice has its own count." : ""}`],
       ["Round progress", practiceRounds
