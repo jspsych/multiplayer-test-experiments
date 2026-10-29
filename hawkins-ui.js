@@ -10,6 +10,22 @@
 (function (global) {
   const P = ".jspsych-multiplayer-reference-game";
 
+  // Time left on the countdown as m:ss ("3:00", "0:09").
+  function clock(seconds) {
+    const s = Math.max(0, Math.floor(seconds));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  // A length of time in words, for instructions: "3 minutes", "1 minute 30 seconds", "45 seconds".
+  function duration(seconds) {
+    const s = Math.max(0, Math.round(seconds));
+    const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+    const minutes = Math.floor(s / 60);
+    const rest = s % 60;
+    if (minutes === 0) return unit(rest, "second");
+    return rest === 0 ? unit(minutes, "minute") : `${unit(minutes, "minute")} ${unit(rest, "second")}`;
+  }
+
   // The round header: trial progress, number correct and time remaining in separate panels, then
   // the line that carries the round's result ("Correct!", "Incorrect." or "Time's up! …").
   // `score` is the count of saved `correct: true` rows before this round; `result` adds the current
@@ -20,7 +36,7 @@
     return `<div class="hk-status">
       <div class="hk-stat"><span>${practice ? "Practice" : "Progress"}</span><strong>${practice ? "Round" : "Trial"} ${round} of ${total}</strong></div>
       <div class="hk-stat"><span>${practice ? "Practice correct" : "Number correct"}</span><strong id="hk-score" data-score="${score}">${score}</strong></div>
-      <div class="hk-stat hk-timer"><span>Time remaining</span><strong id="round-remaining">${seconds}s</strong><small id="hk-time-hint"></small></div>
+      <div class="hk-stat hk-timer"><span>Time remaining</span><strong id="round-remaining">${clock(seconds)}</strong><small id="hk-time-hint"></small></div>
     </div>
     <p id="round-note" class="hk-round-note" aria-live="polite"></p>`;
   }
@@ -92,5 +108,5 @@
     if (score) score.textContent = String(Number(score.dataset.score) + (kind === "correct" ? 1 : 0));
   }
 
-  global.HawkinsUI = { header, chat, timer, result };
+  global.HawkinsUI = { header, chat, timer, result, clock, duration };
 })(typeof globalThis !== "undefined" ? globalThis : this);

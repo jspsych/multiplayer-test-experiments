@@ -19,9 +19,9 @@
     <script src="vendor/adapter-multiplayer-jatos.js"></script>
     <script src="vendor/plugin-multiplayer-role.js"></script>
     <script src="vendor/plugin-multiplayer-reference-game.js"></script>
+    <script src="vendor/extension-presence-check.js"></script>
     <script src="tangrams.js"></script>
     <script src="hawkins.js"></script>
-    <script src="presence-check.js"></script>
     <script src="hawkins-ui.js"></script>
     <script src="hawkins-onboarding.js"></script>
     <link rel="stylesheet" href="vendor/jspsych.css" />
@@ -211,38 +211,6 @@
         display: none;
       }
 
-      /* "Are you still with us?" reminder (presence-check.js). The backdrop takes clicks so the
-         button is the only response; the round's timers keep running underneath. */
-      .presence-check {
-        position: fixed;
-        inset: 0;
-        z-index: 1000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0, 0, 0, 0.45);
-      }
-      .presence-check[hidden] {
-        display: none;
-      }
-      .presence-check-card {
-        max-width: 26em;
-        padding: 1.2em 1.6em;
-        border-radius: 8px;
-        background: #fff;
-        text-align: center;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-      }
-      .presence-check-button {
-        padding: 0.5em 1.4em;
-        font-size: 1.05em;
-      }
-      .presence-check-remaining {
-        margin-bottom: 0;
-        font-size: 0.9em;
-        color: #555;
-      }
-
       /* INTERFACE WALKTHROUGH (hawkins-onboarding.js): a static preview of the game screen, revealed
          one part at a time. The plugin's own styles are not on the page until the first round, so
          the preview's grid and chat are styled here. */
@@ -337,11 +305,12 @@
     //   1. 18 rounds instead of 72: three blocks of six targets, played without breaks. A shared
     //      shuffle selects six of the twelve tangrams per dyad; each is targeted once per block.
     //      All twelve tangrams remain visible on every trial.
-    //   2. A 60s round limit. The original ran untimed. When it runs out the matcher's empty choice
-    //      is submitted (`selection_timeout`), both players see a "Time's up" result for the usual
-    //      feedback duration, and the game moves on. Timed-out rounds have
-    //      `multiplayer_outcome: "timeout"`, `round_result: "timeout"` and an `idle_role`; they are
-    //      never scored as incorrect and never end the game. Only a disconnection does.
+    //   2. A 3-minute round limit (CONFIG.ROUND_TIMEOUT_MS). The original ran untimed. When it runs
+    //      out the matcher's empty choice is submitted (`selection_timeout`), both players see a
+    //      "Time's up" result for the usual feedback duration, and the game moves on. Timed-out
+    //      rounds have `multiplayer_outcome: "timeout"`, `round_result: "timeout"` and an
+    //      `idle_role`; they are never scored as incorrect and never end the game. Only a
+    //      disconnection, or a participant's removal after unanswered inactivity warnings, does.
     //   3. Gate semantics. The original sets `messageSent` on ANY chat message, including the
     //      matcher's own, so a matcher could unlock their click by typing. The plugin counts only the
     //      partner's message, which is the stricter reading and, judging by the source comment, the
@@ -380,6 +349,9 @@
         partner_dropped: "insertcodehere", // partner left, or this participant's connection was lost
         no_match: "insertcodehere", // never got a partner
         reloaded: "insertcodehere", // this participant reloaded the page mid-session
+        // Removed after PRESENCE_MAX_MISSES unanswered inactivity warnings in a row. Whether this
+        // exit is paid is pending review; its partner gets partner_dropped.
+        removed_inactive: "insertcodehere",
       },
       PROLIFIC_SUBMIT_URL: "https://app.prolific.com/submissions/complete",
       NO_MATCH_PAYMENT_USD: 1.25,
@@ -388,20 +360,28 @@
       // How long each pair barrier waits for the partner to continue before giving up: after the
       // role recap and walkthrough (no-match exit) and, with practice, after the practice rounds
       // (partner-dropped exit). Without a barrier the faster reader would start a round (and its
-      // 60s timer) alone while the partner is still reading, desyncing the two timelines. Long
+      // timer) alone while the partner is still reading, desyncing the two timelines. Long
       // enough for a slow reader to finish the walkthrough.
       READY_TIMEOUT_MS: 3 * 60000,
       // Round limit, as the matcher's `selection_timeout`: on expiry both players see feedback.
-      ROUND_TIMEOUT_MS: 60000,
+      ROUND_TIMEOUT_MS: 3 * 60000,
       // The timer panel shows a warning for this many seconds before ROUND_TIMEOUT_MS.
       TIMER_WARNING_SECONDS: 10,
       // Backstop `round_timeout` after the limit, for when the matcher's submission never arrives
       // (e.g. a frozen tab). That round ends without feedback, still as a timeout.
       ROUND_TIMEOUT_GRACE_MS: 5000,
-      // "Are you still with us?" reminder during rounds (presence-check.js): shown after this long
-      // with no activity, closed as missed if its button is not clicked in time. Never ends the game.
+      // "Are you still with us?" warning during rounds (vendor/extension-presence-check.js). It is
+      // shown after PRESENCE_PROMPT_MS with no activity; any mouse movement, click, key press,
+      // wheel scroll or touch dismisses it. Unanswered for PRESENCE_RESPONSE_MS, it closes as
+      // missed and the idle clock restarts. PRESENCE_MAX_MISSES missed in a row remove the
+      // participant (exit removed_inactive); a response, or any activity between warnings, resets
+      // the count. The count carries across rounds, and feedback (paused) neither adds to nor
+      // resets it. With 30s / 30s / 2, removal comes about 120s after the last activity.
       PRESENCE_PROMPT_MS: 30000,
-      PRESENCE_RESPONSE_MS: 15000,
+      PRESENCE_RESPONSE_MS: 30000,
+      PRESENCE_MAX_MISSES: 2,
+      // The tab title while a warning is open, for a participant who is in another tab.
+      PRESENCE_TITLE_ALERT: "⚠ Are you still with us?",
       // How long a partner can be disconnected before they count as gone (core default: 10s).
       DROPOUT_TIMEOUT_MS: 30000,
       // How long this participant's own connection can stay down before the session gives up on it
@@ -503,8 +483,10 @@
     let partnerId = null;
     let reloaded = false;
     let noMatchReason = null;
-    // "partner_left" | "connection_lost" | "partner_not_ready_for_main"
+    // "partner_left" | "connection_lost" | "partner_not_ready_for_main" | "removed_inactive"
     let interruption = null;
+    // Why this participant was removed ("inactivity"), or null. Saved as `removal_reason`.
+    let removalReason = null;
     let interruptedAtRound = null;
     let interruptedPhase = null; // "practice" | "main_ready" | "main"
     let outcome = null;
@@ -527,6 +509,7 @@
       outcome = {
         ended_reason: exit,
         no_match_reason: noMatchReason,
+        removal_reason: removalReason,
         interrupted_at_round: interruptedAtRound,
         interrupted_phase: interruptedPhase,
         n_practice_played: playedRounds("practice").count(),
@@ -637,13 +620,14 @@
              at least one message before the Matcher can choose.</li>
          <li>The shapes are arranged differently on your two screens. Describe the shape itself,
              rather than its position.</li>
-         <li>You have ${roundSeconds} seconds to describe and pick a tangram. A countdown on every
+         <li>You have ${HawkinsUI.duration(roundSeconds)} to describe and pick a tangram. A countdown on every
              trial shows the time remaining and warns you in the last
              ${CONFIG.TIMER_WARNING_SECONDS} seconds. If time runs out before the Matcher picks, you
              both see a "Time's up" message (the Matcher also sees the correct shape), then move on
              to the next trial.</li>
-         <li>If you're inactive for a while, a message will ask you to click a button to show
-             you're still with us.</li>
+         <li>If you're inactive for a while, a message will ask whether you're still with us.
+             Moving the mouse, typing or clicking answers it. If ${CONFIG.PRESENCE_MAX_MISSES} of these
+             messages in a row go unanswered, you'll be removed from the study.</li>
          <li>After the choice, you both see "Correct!" or "Incorrect." The correct shape is outlined
              in green on the Matcher's screen. If the Matcher picked a different one, their pick is
              outlined in blue.</li>
@@ -949,7 +933,7 @@
       };
     }
 
-    // Ready barrier before the first round: nobody starts a round (and its 60s timer) while the
+    // Ready barrier before the first round: nobody starts a round (and its timer) while the
     // partner is still reading the recap or the walkthrough. A failure here is a no-match exit,
     // as it was before practice existed.
     const readyTrial = pairBarrierTrial("ready", {
@@ -996,6 +980,20 @@
       }
     }
 
+    // The presence check's on_expire: CONFIG.PRESENCE_MAX_MISSES warnings in a row went unanswered.
+    // Leaving the session ends the round through the plugin's own path (multiplayer_outcome
+    // "cancelled"), and the partner's round ends with "participant_left", so they take the
+    // existing partner-left exit. This participant's on_finish then skips to the removed_inactive
+    // exit. The extension's own data on this round's row records the missed warnings.
+    function removeForInactivity() {
+      if (interruption) return;
+      interruption = "removed_inactive";
+      removalReason = "inactivity";
+      Promise.resolve()
+        .then(() => jsPsych.multiplayer.disconnect())
+        .catch((error) => console.error("Could not leave the session after removal", error));
+    }
+
     let roundCountdownInterval = null;
     // Shares, and on the director receives, how many director messages had reached the matcher by
     // the deadline (Hawkins.createDeadlineWitness). Replaced every round in on_load.
@@ -1033,13 +1031,19 @@
       round_timeout: CONFIG.ROUND_TIMEOUT_MS + CONFIG.ROUND_TIMEOUT_GRACE_MS,
       // A partner who leaves ends the round with multiplayer_outcome: "participant_left".
       end_on_participant_left: true,
-      // Suppressed once feedback starts (inFeedbackPhase), so it never covers the round's result.
+      // Paused once feedback starts (inFeedbackPhase), so it never covers the round's result; a
+      // pause neither counts as a miss nor resets the count. Every input type dismisses a warning
+      // (the extension's default), and the input still reaches the page.
       extensions: [{
         type: jsPsychExtensionPresenceCheck,
         params: {
           prompt_after: CONFIG.PRESENCE_PROMPT_MS,
           respond_within: CONFIG.PRESENCE_RESPONSE_MS,
+          max_consecutive_misses: CONFIG.PRESENCE_MAX_MISSES,
+          count_across_trials: true,
+          title_alert: CONFIG.PRESENCE_TITLE_ALERT,
           paused: () => inFeedbackPhase(),
+          on_expire: () => removeForInactivity(),
         },
       }],
       save_interaction_history: true,
@@ -1120,7 +1124,7 @@
           const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
           HawkinsUI.timer(display, seconds, CONFIG.TIMER_WARNING_SECONDS, result === null);
           if (result === null) {
-            remaining.textContent = `${seconds}s`;
+            remaining.textContent = HawkinsUI.clock(seconds);
           } else if (result !== "timeout") {
             remaining.textContent = "Selection complete";
             // The score panel becomes the saved count plus this round, if it was correct.
@@ -1147,9 +1151,13 @@
         deadlineWitness = null;
         if (CONFIG.JATOS_SAVE_PER_ROUND) saveProgress();
 
-        // Timeouts never end the game; only a disconnection does.
-        if (data.multiplayer_outcome === "participant_left") interruption = "partner_left";
-        else if (data.multiplayer_outcome === "connection_lost") interruption = "connection_lost";
+        // Timeouts never end the game; only a disconnection or a removal does. A removal is set
+        // already (removeForInactivity, which ends the round as "cancelled"), and is kept even if
+        // the partner left in the same moment.
+        if (!interruption) {
+          if (data.multiplayer_outcome === "participant_left") interruption = "partner_left";
+          else if (data.multiplayer_outcome === "connection_lost") interruption = "connection_lost";
+        }
         if (interruption) {
           interruptedAtRound = data.round;
           interruptedPhase = data.phase;
@@ -1251,6 +1259,12 @@
             <p>Your connection to the game server dropped and did not come back, so we have ended
                the study here. <strong>Your payment is not affected.</strong></p>
             ${progress}`;
+        case "removed_inactive":
+          return `<h2>The study has ended for you</h2>
+            <p>${CONFIG.PRESENCE_MAX_MISSES} "Are you still with us?" messages in a row went
+               unanswered, so we ended the study for you and your partner.</p>
+            ${progress}
+            <p>Please submit using the button below. Your submission will be reviewed.</p>`;
         case "partner_not_ready_for_main":
           return `<h2>We couldn't start the main game together</h2>
             <p>Your partner didn't continue to the main game in time, so we have ended the study

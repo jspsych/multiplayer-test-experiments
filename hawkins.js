@@ -245,13 +245,16 @@
   //   noMatchReason set when the participant never got a partner (lobby, pairing, connect errors)
   //   interruption  set when a game in progress ended early: "partner_left" or "connection_lost"
   //                 during a practice or main round, or at the barrier between them,
-  //                 "partner_left" or "partner_not_ready_for_main". Timeouts never end the game, so
-  //                 there is no inactivity exit.
+  //                 "partner_left" or "partner_not_ready_for_main"; or "removed_inactive" when
+  //                 this participant left several "Are you still with us?" warnings in a row
+  //                 unanswered during rounds. Round timeouts alone never end the game.
   //
   // Both barrier exits after practice pay the partner_dropped code, not no_match: the pair was
   // matched and played practice rounds together, so the participant has spent far longer than the
   // lobby wait the no-match payment covers, and was stranded by the partner, as in a game that
   // ends mid-way. The barrier before practice stays a no-match exit (noMatchReason), as before.
+  // A removed participant's partner sees them leave, so takes partner_left (partner_dropped); the
+  // removed participant gets their own code, removed_inactive.
   // Returns the exit name and the completion-code key it pays.
   const EXIT_CODES = {
     reloaded: "reloaded",
@@ -259,6 +262,7 @@
     partner_left: "partner_dropped",
     connection_lost: "partner_dropped",
     partner_not_ready_for_main: "partner_dropped",
+    removed_inactive: "removed_inactive",
     complete: "complete",
   };
 

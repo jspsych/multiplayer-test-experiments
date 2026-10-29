@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
+import "../hawkins-ui.js";
 
 test("comprehension retries preserve attempts, save answers, and release only after passing", () => {
   const html = fs.readFileSync(new URL("../reference-game-hawkins.html", import.meta.url), "utf8");
@@ -12,7 +13,7 @@ test("comprehension retries preserve attempts, save answers, and release only af
   const display = { innerHTML: "", querySelector: () => ({ addEventListener: (_, fn) => { submit = fn; } }) };
   const context = vm.createContext({
     CONFIG: { BLOCKS: 3, ROUND_TIMEOUT_MS: 60000, COMPREHENSION_CHECK: true },
-    SHAPES: Array(12), jsPsychCallFunction: {}, performance: { now: () => 100 },
+    SHAPES: Array(12), jsPsychCallFunction: {}, performance: { now: () => 100 }, HawkinsUI: globalThis.HawkinsUI,
     jsPsych: { getDisplayElement: () => display, randomization: { shuffle: (a) => a.slice().reverse() } },
     FormData: class { get(name) { return response[name]; } },
     saveProgress: (label) => saves.push(label),
