@@ -27,14 +27,19 @@ The number-correct panel starts each round at the count of saved `correct: true`
 rows have `correct: null`). A correct round adds one during feedback. The panel is recomputed from
 the saved count on every refresh, so a round is never counted twice.
 
-The role-specific shape highlights are unchanged. The director's recap now points to the result
-message instead of the score, because green on the director's screen marks the matcher's pick.
+The role-specific shape highlights are unchanged. Green on the director's screen marks the
+matcher's pick, not necessarily the right shape; the walkthrough's "Time, score and progress" step
+says so (the role recap that used to explain it is now a one-sentence reminder).
 
 ## Chat
 
 The chat has a "Conversation with your partner" heading with an empty-state hint, a "Message your
 partner" label, role-specific help, a stronger input border and focus outline, and an emphasized
 Send button. The plugin's "You are the …" line is hidden; the prompt already names the role.
+
+The chat sits to the right of the shapes (`chat_position: "beside"`), in a fixed-height column whose
+message log scrolls, so a whole round fits a 1280×720 window without the page scrolling. The header
+panels are a single compact row for the same reason.
 
 ## Not ported
 

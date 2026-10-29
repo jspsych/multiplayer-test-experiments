@@ -15,8 +15,8 @@ live, version, and be piloted independently.
 - [`hawkins.js`](hawkins.js) — the Hawkins build's session logic (main and practice schedules, the
   pair barriers, round classification, exit routing, and JATOS saving), kept out of the page so
   [`tests/`](tests/) can load it.
-- [`hawkins-onboarding.js`](hawkins-onboarding.js) — the seven-step, role-specific walkthrough of
-  the game screen shown after the role recap. Practice rounds use targets outside the dyad's main
+- [`hawkins-onboarding.js`](hawkins-onboarding.js) — the four-step, role-specific walkthrough of
+  the game screen shown after the one-sentence role reminder. Practice rounds use targets outside the dyad's main
   schedule and are saved with `phase: "practice"`; see
   [`WALKTHROUGH-PRACTICE.md`](WALKTHROUGH-PRACTICE.md).
 - [`hawkins-ui.js`](hawkins-ui.js) — the Hawkins round display: separate trial, number-correct and
