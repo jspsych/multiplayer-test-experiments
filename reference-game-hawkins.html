@@ -678,9 +678,9 @@
              they've sent a message, and you can ask questions in the chat.</li>
          <li>You have up to ${HawkinsUI.duration(roundSeconds)} per round. Once the Matcher chooses, you both
              see the result and move on.</li>
-         <li>If you're inactive for a while, we'll ask if you're still there; moving the mouse,
-             typing or clicking answers. ${CONFIG.PRESENCE_MAX_MISSES} unanswered in a row removes
-             you from the study.</li>
+         <li>If you're inactive for a while, a message will ask whether you're still with us.
+             Moving the mouse, typing or clicking answers it. If ${CONFIG.PRESENCE_MAX_MISSES} of these
+             messages in a row go unanswered, you'll be removed from the study.</li>
        </ul>
        <p>${CONFIG.PRACTICE_ROUNDS
          ? `After ${CONFIG.PRACTICE_ROUNDS} practice rounds, the main game has ${totalRounds}
