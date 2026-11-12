@@ -23,13 +23,18 @@ live, version, and be piloted independently.
   time-remaining panels, a warning in each round's last 10 seconds, a "Correct!", "Incorrect." or
   "Time's up!" result line, and labels for the chat. Presentation only; see
   [`GAMEPLAY-CLARITY.md`](GAMEPLAY-CLARITY.md).
-- [`presence-check.js`](presence-check.js) — a jsPsych extension on each Hawkins round: after 30s
-  with no mouse, keyboard, wheel or touch input from the participant (script-dispatched events and
-  the chat log's own scrolling don't count) it asks "Are you still with us?" and waits 15s for a
-  button click. It stays out of feedback. A reminder only: missed prompts and clicks on its backdrop
-  are recorded (`presence_*` fields) but never end the round or the game.
+- The "Are you still with us?" check on each Hawkins round is the upstream
+  `@jspsych-multiplayer/extension-presence-check`, vendored from a pinned commit of draft
+  jspsych-multiplayer PR #125. After 30s with no mouse, keyboard, wheel or touch input (script-
+  dispatched events and the chat log's own scrolling don't count) it shows a warning that any such
+  input dismisses, and sets the tab title while it is open. Unanswered for 30s, it counts as
+  missed. Two missed in a row, counted across rounds, remove the participant (exit
+  `removed_inactive`, with its own completion code, whose payment is pending review); the partner
+  takes the partner-left exit. It pauses during feedback. Its `presence_*` fields, including
+  whether the tab was hidden, are saved on each round.
 - [`scripts/vendor.mjs`](scripts/vendor.mjs) — fills the gitignored `vendor/` with every script the
-  Hawkins page loads, at pinned versions. [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
+  Hawkins page loads, at pinned versions (per package, so one package can come from another
+  upstream commit). [`scripts/make-jzip.mjs`](scripts/make-jzip.mjs) packages
   the page as a JATOS study archive.
 - [`reference-game-cwg.html`](reference-game-cwg.html) — replicates Clark & Wilkes-Gibbs (1986),
   *Cognition* 22:1–39. Full-board condition: all 12 tangrams as an ordered target, 6 trials.
@@ -52,7 +57,7 @@ unrestricted two-way chat — faithful to both papers and load-bearing for the r
 effect both measure. Both were verified parameter-by-parameter against the papers **and** the
 original hawkrobe/tangrams experiment code, and play-tested two-tab at full schedule length.
 
-> **`round_timeout` is not from either paper.** Both builds set one (60s Hawkins, 180s C&WG) purely so
+> **`round_timeout` is not from either paper.** Both builds set one (180s each) purely so
 > a disconnected or absent partner cannot hang the trial forever — neither original was timed. Rounds
 > it ends are logged as a timeout (`multiplayer_outcome: "timeout"` in the Hawkins build, `ended_by: "timeout"` in C&WG) with a null assignment, so they're easy to exclude.
 > In the Hawkins build the limit is the matcher's `selection_timeout`: both players see a "Time's up"

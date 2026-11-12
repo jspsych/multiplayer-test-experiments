@@ -22,7 +22,7 @@
       ["Messaging your partner", director
         ? "Type here and press Enter or Send. Send at least one message each round; your partner can't choose until you do."
         : "Ask questions here at any time. You can choose a shape once the Director has sent a message that round."],
-      ["Time, score and progress", `You have up to ${seconds} seconds per round. After each choice you both see "Correct!" or "Incorrect."` +
+      ["Time, score and progress", `You have up to ${global.HawkinsUI.duration(seconds)} per round. After each choice you both see "Correct!" or "Incorrect."` +
         (director ? " Your partner's pick is outlined in green, whether or not it was right." : " The right shape is outlined in green, and a wrong pick in blue.") +
         ` If time runs out, you see "Time's up!" and move on.${practiceRounds ? " Practice has its own count." : ""}`],
       [practiceRounds ? "Ready to practice" : "Ready to begin", practiceRounds

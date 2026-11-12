@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import "../hawkins.js";
+import "../hawkins-ui.js";
 import "../hawkins-onboarding.js";
 
 const { phaseSchedules, sequentialSchedule, exitFor } = globalThis.Hawkins;
@@ -185,7 +186,7 @@ function mainGame({ rows = [] } = {}) {
   });
   vm.runInContext(sessionLogic, context);
   vm.runInContext(
-    "let noMatchReason = null, reloaded = false, interruption = null, interruptedAtRound = null,\n" +
+    "let noMatchReason = null, reloaded = false, interruption = null, removalReason = null, interruptedAtRound = null,\n" +
       "  interruptedPhase = null, outcome = null, participantId = 'me', partnerId = 'them';\n" +
       between("    const completedRounds =", "    // ---- Saving") +
       between("    const readyMinutes =", "    // Ready barrier before the first round") +
@@ -294,7 +295,8 @@ test("the walkthrough has four role-specific steps", () => {
   assert.equal(matcher.length, 4);
   for (const i of [0, 1, 2]) assert.notDeepEqual(director[i], matcher[i]);
   assert.match(director[0][1], /yellow/);
-  assert.match(director[2][1], /60 seconds/);
+  assert.match(director[2][1], /up to 1 minute per round/);
+  assert.match(HawkinsOnboarding.steps({ role: "director", seconds: 180, practiceRounds: 2 })[2][1], /up to 3 minutes per round/);
   assert.match(director[2][1], /green, whether or not it was right/);
   assert.match(matcher[2][1], /blue/);
   assert.match(director[3][1], /2 practice rounds/);

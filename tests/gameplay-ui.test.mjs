@@ -72,11 +72,24 @@ test("the timer warning shows in the last seconds of a running round only", () =
   assert.equal(d.nodes["#hk-time-hint"].textContent, "");
 });
 
+test("the countdown reads m:ss and instructions read the limit in words", () => {
+  assert.equal(HawkinsUI.clock(180), "3:00");
+  assert.equal(HawkinsUI.clock(143), "2:23");
+  assert.equal(HawkinsUI.clock(9), "0:09");
+  assert.equal(HawkinsUI.clock(-1), "0:00");
+  assert.equal(HawkinsUI.duration(180), "3 minutes");
+  assert.equal(HawkinsUI.duration(60), "1 minute");
+  assert.equal(HawkinsUI.duration(90), "1 minute 30 seconds");
+  assert.equal(HawkinsUI.duration(45), "45 seconds");
+  assert.equal(HawkinsUI.duration(1), "1 second");
+});
+
 test("the header carries the saved score for the result to add to", () => {
   const html = HawkinsUI.header({ round: 4, total: 18, score: 2, seconds: 60 });
   assert.match(html, /Trial 4 of 18/);
   assert.match(html, /id="hk-score" data-score="2">2</);
-  assert.match(html, /id="round-remaining">60s</);
+  assert.match(html, /id="round-remaining">1:00</);
+  assert.match(HawkinsUI.header({ round: 1, total: 18, score: 0, seconds: 180 }), /id="round-remaining">3:00</);
   assert.match(html, /id="round-note"/);
 });
 
@@ -226,14 +239,14 @@ test("the page shows a timeout as Time's up, with no change to the score", () =>
 });
 
 test("the page's timer warning follows the round deadline and stops at the result", () => {
-  for (const roundMs of [60000, 30000]) {
+  for (const roundMs of [180000, 60000, 30000]) {
     const r = round({ roundMs });
     const timer = r.d.nodes[".hk-timer"];
     r.advance(roundMs - 11000);
-    assert.equal(r.d.nodes["#round-remaining"].textContent, "11s");
+    assert.equal(r.d.nodes["#round-remaining"].textContent, "0:11");
     assert(!timer.classes.has("is-urgent"));
     r.advance(1000);
-    assert.equal(r.d.nodes["#round-remaining"].textContent, "10s");
+    assert.equal(r.d.nodes["#round-remaining"].textContent, "0:10");
     assert(timer.classes.has("is-urgent"));
     assert.equal(r.d.nodes["#hk-time-hint"].textContent, "Less than 10 seconds left");
     r.submit({ assignment: { 1: "C" }, rt: 1, n_correct: 1, n_targets: 1 });
