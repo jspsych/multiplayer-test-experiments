@@ -287,16 +287,18 @@ test("the terminal summary keeps practice separate and counts only main-game rou
 
 // ---- Walkthrough and packaging -----------------------------------------------------------------
 
-test("the walkthrough has seven role-specific steps", () => {
+test("the walkthrough has four role-specific steps", () => {
   const director = HawkinsOnboarding.steps({ role: "director", seconds: 60, practiceRounds: 2 });
   const matcher = HawkinsOnboarding.steps({ role: "matcher", seconds: 60, practiceRounds: 2 });
-  assert.equal(director.length, 7);
-  assert.equal(matcher.length, 7);
-  assert.notDeepEqual(director[1], matcher[1]);
-  assert.match(director[1][1], /yellow/);
-  assert.match(director[3][1], /60 seconds/);
-  assert.match(director[6][1], /2 practice rounds/);
-  assert.doesNotMatch(HawkinsOnboarding.steps({ role: "matcher", seconds: 60, practiceRounds: 0 })[6][1], /practice/);
+  assert.equal(director.length, 4);
+  assert.equal(matcher.length, 4);
+  for (const i of [0, 1, 2]) assert.notDeepEqual(director[i], matcher[i]);
+  assert.match(director[0][1], /yellow/);
+  assert.match(director[2][1], /60 seconds/);
+  assert.match(director[2][1], /green, whether or not it was right/);
+  assert.match(matcher[2][1], /blue/);
+  assert.match(director[3][1], /2 practice rounds/);
+  assert.doesNotMatch(HawkinsOnboarding.steps({ role: "matcher", seconds: 60, practiceRounds: 0 })[3][1], /practice/);
 });
 
 test("the page runs the walkthrough, practice and second barrier in order, and the archive ships the script", () => {

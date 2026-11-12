@@ -6,10 +6,13 @@ Ported from PR #41 by @htsukamoto5, onto main's connection, barrier, round and e
 
 After pairing, each participant sees:
 
-1. **Role recap** (unchanged).
-2. **Interface walkthrough** (`hawkins-onboarding.js`). Seven steps reveal a preview of the game
-   screen one part at a time: a blank introduction, the shapes, the chat, the timer, the number
-   correct, the round progress, and the complete screen. It uses the real tangram images and the
+1. **Role reminder**: one sentence naming the participant's role. The general instructions before
+   the comprehension check explain both roles, so this screen no longer repeats them.
+2. **Interface walkthrough** (`hawkins-onboarding.js`). Four steps reveal a preview of the game
+   screen one part at a time: the shapes, the chat, the panels at the top (time, number correct and
+   progress, with what the green and blue outlines mean for each role), and the complete screen.
+   The preview has the round's layout (chat beside the shapes), and parts not shown yet keep their
+   space so nothing moves between steps. It uses the real tangram images and the
    round header and chat labels from `hawkins-ui.js`. The chat is disabled, the shapes can't be
    chosen, and no countdown runs. The Director and the Matcher get different explanations, and only
    the Director's preview outlines a target (the first practice target, never a main-game target).
