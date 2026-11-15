@@ -117,10 +117,30 @@ deliberate test upload, since it writes into the study's Drive folder. Set the I
 to disable DataPipe everywhere. Turn on **Accept new data** in the DataPipe dashboard and verify a
 completed test run in the linked Drive folder before a paid run. The extension stages each completed
 trial and submits one JSON file when the jsPsych timeline ends; an abandoned run can yield a
-`.partial.json` file. A participant who reloads mid-session produces two files: a partial one from
-the page they left and a short final one from the reloaded page, which records the `reloaded` exit.
-The filename is random and carries no participant identifier. Prolific, participant, and dyad IDs
-remain in the saved rows. JATOS result data is saved separately.
+`.partial.json` file. Each attempt produces at most one file: a tab that reloads after joining a
+game runs with DataPipe off, so a mid-session reload leaves only the `.partial.json` from the page
+the participant left (JATOS still records the reload exit), and a tab that reloads on its end screen
+uploads nothing more. The filename is random and carries no participant identifier. Prolific,
+participant, and dyad IDs remain in the saved rows. JATOS result data is saved separately.
+
+### Reloads and repeat attempts
+
+- **Reload on the end screen.** The end screen and its completion code are kept in the tab
+  (`sessionStorage`). A reload shows the same screen and code again instead of the reload exit,
+  runs nothing, and saves nothing; submitting then ends the JATOS study result without data.
+- **Leaving during the game.** From connecting until the end screen, closing or reloading the tab
+  asks for confirmation (the browser's own `beforeunload` prompt). A participant who leaves anyway
+  takes the reload exit if they come back, and their partner the paid partner-left exit.
+- **One attempt per Prolific ID.** On JATOS, the page claims a hash of the Prolific ID in the
+  batch session, which every run in the batch shares on the server. A reload of the same tab is
+  the same attempt. Another tab, browser, or a cleared cookie is turned away before joining a group:
+  it sees the first attempt's completion code once that attempt has ended, or otherwise an "already
+  open somewhere else" screen with the reload code. Batch session keys look like
+  `attempt_<32 hex>` and never hold the Prolific ID itself, since every participant's browser
+  receives the batch session. A run that is turned away still counts toward the batch's **Max total
+  workers**. If the batch session cannot be reached, the participant is let in.
+- **Submitting twice.** The submit button acts once, and JATOS saves replace the result data rather
+  than adding to it.
 
 The terminal screen never waits for the upload. It shows the exit message and the Prolific controls
 at once; its status line reports the save, or after 3 seconds (`SAVE_STATUS_BUDGET_MS`) says the
@@ -143,7 +163,7 @@ gained session IDs, group formation and rejoin detection, so parts of it are out
 build now has: pairing from one JATOS study link, per-dyad trial orders from the session's shared
 randomness, a walkthrough and two practice rounds before the main game (which add time the
 advertised duration and reward must include), dropout detection with paid exits, per-round timeout classification (timeouts never end
-the game), reload detection, Prolific IDs and completion routing, and saving to JATOS and DataPipe. Still open: real completion codes are unset in
+the game), reload detection, an end screen that survives a reload, one attempt per Prolific ID, Prolific IDs and completion routing, and saving to JATOS and DataPipe. Still open: real completion codes are unset in
 `CONFIG` (placeholders stand in); the build has not run on a real JATOS server, so no JATOS-hosted
 run has yet been checked end to end in the DataPipe Drive folder (a local `?datapipe=1` run can
 check the upload path sooner); and the multiplayer packages are unreleased (the build pins a
