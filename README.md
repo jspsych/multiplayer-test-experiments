@@ -28,7 +28,7 @@ live, version, and be piloted independently.
   jspsych-multiplayer PR #125. After 30s with no mouse, keyboard, wheel or touch input (script-
   dispatched events and the chat log's own scrolling don't count) it shows a warning that any such
   input dismisses, and sets the tab title while it is open. Unanswered for 30s, it counts as
-  missed. Two missed in a row, counted across rounds, remove the participant (exit
+  missed. The first unanswered warning removes the participant (`PRESENCE_MAX_MISSES: 1`, exit
   `removed_inactive`, with its own completion code, whose payment is pending review); the partner
   takes the partner-left exit. It pauses during feedback. Its `presence_*` fields, including
   whether the tab was hidden, are saved on each round.
