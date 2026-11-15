@@ -246,8 +246,9 @@
   //   interruption  set when a game in progress ended early: "partner_left" or "connection_lost"
   //                 during a practice or main round, or at the barrier between them,
   //                 "partner_left" or "partner_not_ready_for_main"; or "removed_inactive" when
-  //                 this participant left several "Are you still with us?" warnings in a row
-  //                 unanswered during rounds. Round timeouts alone never end the game.
+  //                 this participant left an "Are you still with us?" warning unanswered during
+  //                 rounds (CONFIG.PRESENCE_MAX_MISSES in a row). Round timeouts alone never end
+  //                 the game.
   //
   // Both barrier exits after practice pay the partner_dropped code, not no_match: the pair was
   // matched and played practice rounds together, so the participant has spent far longer than the

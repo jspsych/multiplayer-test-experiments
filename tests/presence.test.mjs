@@ -31,7 +31,7 @@ test("CONFIG holds the agreed limits", () => {
   assert.equal(CONFIG.ROUND_TIMEOUT_MS, 180000);
   assert.equal(CONFIG.PRESENCE_PROMPT_MS, 30000);
   assert.equal(CONFIG.PRESENCE_RESPONSE_MS, 30000);
-  assert.equal(CONFIG.PRESENCE_MAX_MISSES, 2);
+  assert.equal(CONFIG.PRESENCE_MAX_MISSES, 1);
   assert.equal(typeof CONFIG.PRESENCE_TITLE_ALERT, "string");
   assert.ok(CONFIG.PRESENCE_TITLE_ALERT.length > 0, "the tab-title alert is on");
   assert.ok("removed_inactive" in CONFIG.COMPLETION_CODES);
@@ -50,7 +50,7 @@ function sandbox() {
   const context = vm.createContext({
     CONFIG: {
       ROUND_TIMEOUT_MS: 180000, ROUND_TIMEOUT_GRACE_MS: 5000, TIMER_WARNING_SECONDS: 10,
-      PRESENCE_PROMPT_MS: 30000, PRESENCE_RESPONSE_MS: 30000, PRESENCE_MAX_MISSES: 2,
+      PRESENCE_PROMPT_MS: 30000, PRESENCE_RESPONSE_MS: 30000, PRESENCE_MAX_MISSES: 1,
       PRESENCE_TITLE_ALERT: "alert", JATOS_SAVE_PER_ROUND: true,
     },
     SHAPES: [], myRole: "director", participantId: "me", partnerId: "them",
@@ -93,7 +93,7 @@ test("each round carries the presence check with the CONFIG limits and the tab-t
   const p = s.params();
   assert.equal(p.prompt_after, 30000);
   assert.equal(p.respond_within, 30000);
-  assert.equal(p.max_consecutive_misses, 2);
+  assert.equal(p.max_consecutive_misses, 1);
   assert.equal(p.count_across_trials, true);
   assert.equal(p.title_alert, "alert");
   // Every input dismisses (the extension's default), so the page sets no dismiss_inputs.
@@ -160,6 +160,9 @@ test("the removal reason is saved with the outcome, and the exit screen promises
   assert.doesNotMatch(message, /paid|payment is not affected/i);
 });
 
-test("the instructions say what an unanswered warning leads to", () => {
-  assert.match(html, /\$\{CONFIG\.PRESENCE_MAX_MISSES\} of these\s+messages in a row go unanswered, you'll be removed from the study/);
+test("the instructions and exit say one unanswered warning leads to removal", () => {
+  assert.match(html, /If you don't answer it in time, you'll be removed from the study\./);
+  assert.match(html, /Moving the mouse, typing or clicking answers it\. \$\{presenceLimitCopy\}/);
+  const message = html.slice(html.indexOf('case "removed_inactive":'), html.indexOf('case "partner_not_ready_for_main":'));
+  assert.match(message, /An "Are you still with us\?" message went unanswered/);
 });
