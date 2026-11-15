@@ -32,6 +32,14 @@ function sharedBatch() {
           version++;
           seen = version;
         },
+        // The server's own copy (a JSON Patch copy from /key/field fails if it is missing).
+        has: async (key, field) => data[key]?.[field] !== undefined,
+        // jatos.batchSession.copy as the server applies it: fails if `from` does not exist.
+        copy: async (from, path) => {
+          const [, key, field] = from.split("/");
+          if (data[key]?.[field] === undefined) throw "Failed to apply patch: no such path";
+          data[key][path.split("/")[2]] = data[key][field];
+        },
         // Another browser writes first, between this client's read and its write.
         raceWith(key, value) { data[key] = value; version++; },
       };
@@ -94,6 +102,61 @@ test("two attempts racing for one ID cannot both claim it", async () => {
   late.raceWith("attempt_k", { attempt: "tab-1", state: "started", at: 1 });
   assert.deepEqual(await claimAttempt(late, "attempt_k", "tab-2", noWait), { status: "in_progress" });
   assert.equal(batch.data.attempt_k.attempt, "tab-1");
+});
+
+test("a write from a stale copy that replaces another claim still leaves only one attempt in", async () => {
+  const batch = sharedBatch();
+  const first = batch.client();
+  const second = batch.client();
+  // Both write before either confirms; the second's stale copy hides the first claim.
+  let release;
+  const settle = new Promise((r) => { release = r; });
+  const firstClaim = claimAttempt(first, "attempt_k", "tab-1", { wait: () => settle });
+  await new Promise((r) => setImmediate(r));
+  const stale = { get: () => undefined, set: async (k, v) => { batch.data[k] = structuredClone(v); }, has: second.has };
+  const secondClaim = claimAttempt(stale, "attempt_k", "tab-2", { wait: () => settle });
+  await new Promise((r) => setImmediate(r));
+  release();
+  const outcomes = (await Promise.all([firstClaim, secondClaim])).map((c) => c.status).sort();
+  assert.deepEqual(outcomes, ["claimed", "in_progress"]);
+  assert.equal(batch.data.attempt_k.attempt, "tab-2", "the last writer holds the claim");
+});
+
+test("a claim that the server acknowledged but then lost to a concurrent write is written again", async () => {
+  const batch = sharedBatch();
+  const client = batch.client();
+  let writes = 0;
+  // The first write is acknowledged, then erased by another browser's concurrent write (of a
+  // different key); the second write is kept.
+  const lossy = {
+    get: client.get,
+    has: client.has,
+    set: async (k, v) => { writes++; await client.set(k, v); if (writes === 1) delete batch.data[k]; },
+  };
+  assert.deepEqual(await claimAttempt(lossy, "attempt_k", "tab-1", noWait), { status: "claimed" });
+  assert.equal(writes, 2);
+  assert.equal(batch.data.attempt_k.attempt, "tab-1");
+});
+
+test("a lost ending is written again so another browser sees the real code", async () => {
+  const batch = sharedBatch();
+  await claimAttempt(batch.client(), "attempt_k", "tab-1", noWait);
+  const client = batch.client();
+  let writes = 0;
+  const lossy = {
+    get: client.get,
+    has: client.has,
+    set: async (k, v) => { const before = structuredClone(batch.data[k]); writes++; await client.set(k, v); if (writes === 1) batch.data[k] = before; },
+  };
+  assert.equal(await finishAttempt(lossy, "attempt_k", "tab-1", { exit: "complete", codeKey: "complete" }, noWait), true);
+  assert.equal(writes, 2);
+  assert.equal(batch.data.attempt_k.state, "ended");
+});
+
+test("a server check that cannot be answered lets the participant in", async () => {
+  const batch = sharedBatch().client();
+  const broken = { ...batch, has: async () => { throw new Error("Timeout sending session patch"); } };
+  assert.equal((await claimAttempt(broken, "attempt_k", "tab-1", noWait)).status, "unavailable");
 });
 
 test("an unusable batch session lets the participant in rather than stranding them", async () => {

@@ -696,6 +696,25 @@
       return {
         get: (key) => jatos.batchSession.get(key),
         set: (key, value) => Promise.resolve(jatos.batchSession.set(key, value)),
+        // Asks the server, not this browser's copy: a JSON Patch copy from key.field, which the
+        // server applies to its own data, fails if that field does not exist there. Sent without
+        // versioning, so only the copy's own check decides, not this browser's possibly stale version.
+        has: (key, field) => {
+          let sent;
+          jatos.batchSessionVersioning = false;
+          try {
+            sent = jatos.batchSession.copy(`/${key}/${field}`, `/${key}/checked`);
+          } finally {
+            jatos.batchSessionVersioning = true;
+          }
+          return Promise.resolve(sent).then(
+            () => true,
+            (error) => {
+              if (/Failed to apply patch/.test(String(error))) return false;
+              throw new Error(String(error));
+            },
+          );
+        },
       };
     }
 

@@ -402,47 +402,85 @@
     return ATTEMPT_KEY_PREFIX + (hash53(1) + hash53(2) + hash53(3)).slice(0, 32);
   }
 
-  // Claims `key` for this attempt. `batch` is { get(key), set(key, value) → Promise }, the JATOS
-  // batch session in the browser. `token` names the attempt and survives a reload of its tab, so
-  // a reload is the same attempt, and a second tab or browser is not. Resolves with
+  // A claim record. The `by_<token>` field puts the token in a path, so the server can check who
+  // holds the claim (batch.confirm).
+  const claimRecord = (token, fields) => ({ attempt: token, [`by_${token}`]: true, ...fields, at: Date.now() });
+
+  function otherAttempt(record) {
+    return record.state === "ended"
+      ? { status: "finished", exit: record.exit, codeKey: record.code_key }
+      : { status: "in_progress" };
+  }
+
+  // Claims `key` for this attempt. `batch` is the JATOS batch session in the browser:
+  //   get(key)              this browser's copy of the key
+  //   set(key, value)       → Promise, a write (rejected if made from an out-of-date version)
+  //   has(key, field)       → Promise<boolean>, whether the server's own copy has key.field
+  // `token` names the attempt and survives a reload of its tab, so a reload is the same attempt,
+  // and a second tab or browser is not. Resolves with
   //   { status: "claimed" }                       first visit, or this attempt reloading
   //   { status: "finished", exit, codeKey }       another attempt already reached its end screen
-  //   { status: "in_progress" }                   another attempt started and has not ended
-  //   { status: "unavailable", error }            the batch session would not take the claim
-  // With JATOS's batch session versioning, a write made from an out-of-date copy is rejected, so
-  // two attempts racing for one key cannot both succeed; the loser re-reads and sees the winner.
-  async function claimAttempt(batch, key, token, { attempts = 5, wait = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  //   { status: "in_progress" }                   another attempt holds the claim
+  //   { status: "unavailable", error }            the batch session could not settle the claim
+  // Neither this browser's copy nor an acknowledged write can be trusted on its own: with writes
+  // from several browsers at once, JATOS can acknowledge a write that a concurrent one then
+  // overwrites, and a browser that opened its channel mid-write can hold a copy missing that
+  // write. So each writer waits `settleMs` and asks the server: its own claim stored means it holds
+  // the key; another claim stored means someone else does; nothing stored means its write was
+  // lost, and it writes again.
+  async function claimAttempt(batch, key, token, {
+    attempts = 5, settleMs = 1000, wait = (ms) => new Promise((r) => setTimeout(r, ms)),
+  } = {}) {
     let error = null;
     for (let i = 0; i < attempts; i++) {
       const record = batch.get(key);
-      if (isObject(record)) {
-        if (record.attempt === token) return { status: "claimed" };
-        if (record.state === "ended") return { status: "finished", exit: record.exit, codeKey: record.code_key };
-        return { status: "in_progress" };
+      // After a lost write, this browser's copy still shows that write, so it is not a reload.
+      if (isObject(record) && (i === 0 || record.attempt !== token)) {
+        return record.attempt === token ? { status: "claimed" } : otherAttempt(record);
       }
       try {
-        await batch.set(key, { attempt: token, state: "started", at: Date.now() });
-        return { status: "claimed" };
+        await batch.set(key, claimRecord(token, { state: "started" }));
       } catch (err) {
         error = err;
         await wait(250 * (i + 1));
+        continue;
+      }
+      await wait(settleMs);
+      try {
+        if (await batch.has(key, `by_${token}`)) return { status: "claimed" };
+        if (await batch.has(key, "attempt")) {
+          await wait(300); // let the holder's record reach this browser's copy
+          const holder = batch.get(key);
+          return isObject(holder) && holder.attempt !== token ? otherAttempt(holder) : { status: "in_progress" };
+        }
+        error = new Error("the claim was lost; writing it again");
+      } catch (err) {
+        return { status: "unavailable", error: String(err?.message ?? err) };
       }
     }
     return { status: "unavailable", error: String(error?.message ?? error) };
   }
 
   // Marks this attempt's claim as ended, with the exit it reached, so another browser with the same
-  // Prolific ID is shown that completion code. Never overwrites another attempt's claim, and never
+  // Prolific ID is shown that completion code. Checks with the server that the write was kept (see
+  // claimAttempt) and tries again if not. Never overwrites another attempt's claim, and never
   // rejects: the end screen does not depend on it.
-  async function finishAttempt(batch, key, token, { exit, codeKey }) {
-    try {
-      const record = batch.get(key);
-      if (isObject(record) && record.attempt !== token) return false;
-      await batch.set(key, { attempt: token, state: "ended", exit, code_key: codeKey, at: Date.now() });
-      return true;
-    } catch {
-      return false;
+  async function finishAttempt(batch, key, token, { exit, codeKey }, {
+    attempts = 3, settleMs = 500, wait = (ms) => new Promise((r) => setTimeout(r, ms)),
+  } = {}) {
+    const marker = `ended_${token}`;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const record = batch.get(key);
+        if (isObject(record) && record.attempt !== token) return false;
+        await batch.set(key, claimRecord(token, { state: "ended", exit, code_key: codeKey, [marker]: true }));
+        await wait(settleMs);
+        if (await batch.has(key, marker)) return true;
+      } catch {
+        await wait(250 * (i + 1));
+      }
     }
+    return false;
   }
 
   // Combines the results of the save targets in use into one status for the terminal screen.

@@ -120,7 +120,11 @@ trial and submits one JSON file when the jsPsych timeline ends; an abandoned run
 `.partial.json` file. Each attempt produces at most one file: a tab that reloads after joining a
 game runs with DataPipe off, so a mid-session reload leaves only the `.partial.json` from the page
 the participant left (JATOS still records the reload exit), and a tab that reloads on its end screen
-uploads nothing more. The filename is random and carries no participant identifier. Prolific,
+uploads nothing more. DataPipe stages rows in batches (every 10 rows or 10 seconds, set by
+DataPipe), so a `.partial.json` can lack the last few seconds before the tab closed; JATOS has
+them. A refused final upload is not retried: the extension hands the staged rows, which by then
+include every row, to DataPipe as a `.partial.json`, and the end screen asks the participant to
+submit anyway. The filename is random and carries no participant identifier. Prolific,
 participant, and dyad IDs remain in the saved rows. JATOS result data is saved separately.
 
 ### Reloads and repeat attempts
@@ -138,7 +142,11 @@ participant, and dyad IDs remain in the saved rows. JATOS result data is saved s
   open somewhere else" screen with the reload code. Batch session keys look like
   `attempt_<32 hex>` and never hold the Prolific ID itself, since every participant's browser
   receives the batch session. A run that is turned away still counts toward the batch's **Max total
-  workers**. If the batch session cannot be reached, the participant is let in.
+  workers**. If the batch session cannot be reached, the participant is let in. Batch session
+  versioning alone does not stop two browsers from both claiming at once (one write can replace
+  the other unseen), so after writing, the page asks the server whether its own claim is the one
+  stored: a JSON Patch `copy` from a field only that tab writes fails on the server if the field
+  is missing. A claim that was lost without anyone else's in its place is written again.
 - **Submitting twice.** The submit button acts once, and JATOS saves replace the result data rather
   than adding to it.
 
