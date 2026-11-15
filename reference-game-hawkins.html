@@ -406,7 +406,7 @@
         partner_dropped: "insertcodehere", // partner left, or this participant's connection was lost
         no_match: "insertcodehere", // never got a partner
         reloaded: "insertcodehere", // this participant reloaded the page mid-session
-        // Removed after PRESENCE_MAX_MISSES unanswered inactivity warnings in a row. Whether this
+        // Removed after an unanswered inactivity warning (PRESENCE_MAX_MISSES). Whether this
         // exit is paid is pending review; its partner gets partner_dropped.
         removed_inactive: "insertcodehere",
       },
@@ -430,13 +430,14 @@
       // "Are you still with us?" warning during rounds (vendor/extension-presence-check.js). It is
       // shown after PRESENCE_PROMPT_MS with no activity; any mouse movement, click, key press,
       // wheel scroll or touch dismisses it. Unanswered for PRESENCE_RESPONSE_MS, it closes as
-      // missed and the idle clock restarts. PRESENCE_MAX_MISSES missed in a row remove the
-      // participant (exit removed_inactive); a response, or any activity between warnings, resets
-      // the count. The count carries across rounds, and feedback (paused) neither adds to nor
-      // resets it. With 30s / 30s / 2, removal comes about 120s after the last activity.
+      // missed. PRESENCE_MAX_MISSES missed in a row remove the participant (exit
+      // removed_inactive); a response, or any activity between warnings, resets the count. The
+      // count carries across rounds, and feedback (paused) neither adds to nor resets it. With
+      // 30s / 30s / 1, the first unanswered warning removes the participant, about 60s after the
+      // last activity.
       PRESENCE_PROMPT_MS: 30000,
       PRESENCE_RESPONSE_MS: 30000,
-      PRESENCE_MAX_MISSES: 2,
+      PRESENCE_MAX_MISSES: 1,
       // The tab title while a warning is open, for a participant who is in another tab.
       PRESENCE_TITLE_ALERT: "⚠ Are you still with us?",
       // How long a partner can be disconnected before they count as gone (core default: 10s).
@@ -662,6 +663,11 @@
 
     const totalRounds = CONFIG.BLOCKS * CONFIG.TARGETS_PER_BLOCK;
     const roundSeconds = Math.round(CONFIG.ROUND_TIMEOUT_MS / 1000);
+    const presenceLimitCopy =
+      CONFIG.PRESENCE_MAX_MISSES === 1
+        ? "If you don't answer it in time, you'll be removed from the study."
+        : `If ${CONFIG.PRESENCE_MAX_MISSES} of these messages in a row go unanswered, you'll be
+           removed from the study.`;
     // Both roles are explained here, before pairing; after pairing, each participant only gets a
     // one-sentence reminder of their role (roleRecap).
     const generalInstructions = continueScreen(
@@ -679,8 +685,7 @@
          <li>You have up to ${HawkinsUI.duration(roundSeconds)} per round. Once the Matcher chooses, you both
              see the result and move on.</li>
          <li>If you're inactive for a while, a message will ask whether you're still with us.
-             Moving the mouse, typing or clicking answers it. If ${CONFIG.PRESENCE_MAX_MISSES} of these
-             messages in a row go unanswered, you'll be removed from the study.</li>
+             Moving the mouse, typing or clicking answers it. ${presenceLimitCopy}</li>
        </ul>
        <p>${CONFIG.PRACTICE_ROUNDS
          ? `After ${CONFIG.PRACTICE_ROUNDS} practice rounds, the main game has ${totalRounds}
@@ -1298,8 +1303,11 @@
             ${progress}`;
         case "removed_inactive":
           return `<h2>The study has ended for you</h2>
-            <p>${CONFIG.PRESENCE_MAX_MISSES} "Are you still with us?" messages in a row went
-               unanswered, so we ended the study for you and your partner.</p>
+            <p>${
+              CONFIG.PRESENCE_MAX_MISSES === 1
+                ? `An "Are you still with us?" message went unanswered`
+                : `${CONFIG.PRESENCE_MAX_MISSES} "Are you still with us?" messages in a row went unanswered`
+            }, so we ended the study for you and your partner.</p>
             ${progress}
             <p>Please submit using the button below. Your submission will be reviewed.</p>`;
         case "partner_not_ready_for_main":
