@@ -348,7 +348,7 @@
         complete: "insertcodehere",
         partner_dropped: "insertcodehere", // partner left, or this participant's connection was lost
         no_match: "insertcodehere", // never got a partner
-        reloaded: "insertcodehere", // this participant reloaded the page mid-session
+        reloaded: "insertcodehere", // reloaded mid-session, or a second attempt turned away while the first is open
         // Removed after an unanswered inactivity warning (PRESENCE_MAX_MISSES). Whether this
         // exit is paid is pending review; its partner gets partner_dropped.
         removed_inactive: "insertcodehere",
@@ -403,9 +403,36 @@
     };
 
     const onJatos = typeof jatos !== "undefined" && typeof jatos.onLoad === "function";
+
+    // What this tab remembers across a reload. sessionStorage belongs to one tab and survives its
+    // reloads; a new tab or browser starts empty (the Prolific ID claim in start() covers those).
+    const tabStorage = (() => {
+      try {
+        return window.sessionStorage;
+      } catch {
+        return null;
+      }
+    })();
+    // Set once this tab has joined a session. A reload then skips the instructions and quiz it has
+    // already passed, and always reaches the reload exit: the game carried on without it.
+    const CONNECTED_KEY = "hawkins-connected";
+    const resumed = (() => {
+      try {
+        return tabStorage?.getItem(CONNECTED_KEY) === "1";
+      } catch {
+        return false; // Storage unavailable: a reload replays the instructions before reaching the reload exit.
+      }
+    })();
+    // The end screen this tab already reached, if any. start() shows it again instead of the game.
+    const finalScreen = tabStorage ? Hawkins.loadFinalScreen(tabStorage) : null;
+
+    // One DataPipe file per attempt: a finished tab already uploaded its file, and a reloaded tab's
+    // earlier page already staged its rounds, which DataPipe keeps as a .partial.json.
     const datapipeEnabled =
       Boolean(CONFIG.DATAPIPE_EXPERIMENT_ID) &&
-      (onJatos || new URLSearchParams(location.search).get("datapipe") === "1");
+      (onJatos || new URLSearchParams(location.search).get("datapipe") === "1") &&
+      !resumed &&
+      !finalScreen;
 
     // Settles with the extension's final-save result. The extension makes that save after the
     // timeline ends and sets no timeout on it, so the terminal screen never waits for it (see
@@ -563,16 +590,90 @@
               <code style="user-select:all">${code}</code>. Paste it into Prolific to submit.</p>`;
     }
 
-    function submitToProlific(codeKey, successful) {
+    // `withData: false` is for an end screen shown without playing (a reload of a finished tab, or a
+    // second attempt): it ends the JATOS study result with only a log message, so no data set is
+    // sent twice.
+    function submitToProlific(codeKey, successful, { withData = true, message } = {}) {
       const code = CONFIG.COMPLETION_CODES[codeKey];
       if (!code) return;
       const url = `${CONFIG.PROLIFIC_SUBMIT_URL}?cc=${encodeURIComponent(code)}`;
       if (onJatos) {
         // Finishes the JATOS study result, with the final data, before leaving for Prolific.
-        jatos.endStudyAndRedirect(url, jsPsych.data.get().json(), successful);
+        if (withData) jatos.endStudyAndRedirect(url, jsPsych.data.get().json(), successful);
+        else jatos.endStudyAndRedirect(url, successful, message);
       } else {
         window.location.href = url;
       }
+    }
+
+    // The submit button acts once; a second click would end the JATOS study result twice.
+    function wireSubmit(codeKey, successful, options) {
+      const button = document.getElementById("prolific-submit");
+      button?.addEventListener("click", () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        submitToProlific(codeKey, successful, options);
+      });
+    }
+
+    // While connected to a partner, closing or reloading the tab asks for confirmation first, since
+    // leaving ends the game for both. Browsers use their own wording, and ask only once the page
+    // has had a click or key press.
+    function warnBeforeLeaving(event) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+    function startLeaveWarning() {
+      window.addEventListener("beforeunload", warnBeforeLeaving);
+    }
+    function stopLeaveWarning() {
+      window.removeEventListener("beforeunload", warnBeforeLeaving);
+    }
+
+    // One attempt per Prolific ID, on JATOS (Hawkins.claimAttempt). JATOS gives every opening of the
+    // study link a new study result and stops a repeat only by cookie, in the same browser.
+    const ATTEMPT_TOKEN_KEY = "hawkins-attempt";
+    const attempt = { key: null, token: null };
+
+    function batchSessionStore() {
+      return {
+        get: (key) => jatos.batchSession.get(key),
+        set: (key, value) => Promise.resolve(jatos.batchSession.set(key, value)),
+      };
+    }
+
+    // Names this attempt: kept in the tab, so it survives a reload; without tab storage, the JATOS
+    // study result, which a reload keeps too.
+    function attemptToken() {
+      try {
+        let token = tabStorage?.getItem(ATTEMPT_TOKEN_KEY);
+        if (!token) {
+          token = jsPsych.randomization.randomID(24);
+          tabStorage.setItem(ATTEMPT_TOKEN_KEY, token);
+        }
+        return token;
+      } catch {
+        return `study-result-${jatos.studyResultId}`;
+      }
+    }
+
+    async function claimProlificAttempt() {
+      if (!onJatos || !prolific.pid) return { status: "skipped" };
+      try {
+        attempt.token = attemptToken();
+        attempt.key = await Hawkins.attemptKey(prolific.pid);
+        const claim = await Hawkins.claimAttempt(batchSessionStore(), attempt.key, attempt.token);
+        // Let a participant in when the server could not be asked, rather than strand them.
+        if (claim.status === "unavailable") console.error("Could not claim the Prolific ID", claim.error);
+        return claim;
+      } catch (error) {
+        console.error("Could not claim the Prolific ID", error);
+        return { status: "unavailable" };
+      }
+    }
+
+    function finishProlificAttempt(exit, codeKey) {
+      if (attempt.key) Hawkins.finishAttempt(batchSessionStore(), attempt.key, attempt.token, { exit, codeKey });
     }
 
     // ---- Timeline -------------------------------------------------------------------------------
@@ -1303,26 +1404,35 @@
         : "The final upload was not accepted. Please submit anyway and message the researcher.";
     }
 
-    // The terminal screen shows the exit message and the submit controls at once, and never waits
-    // on a save. It renders beside jsPsych's display element, which it hides: once the timeline
+    // Puts up an end screen beside jsPsych's display element, which it hides: once the timeline
     // ends, the Pipe extension writes its "Saving data" message into that element and then awaits
     // Firebase and pipe.jspsych.org with no timeout, which on a lost connection can be forever.
-    // The status line follows the saves and gives up waiting after SAVE_STATUS_BUDGET_MS.
-    function showTerminalScreen(exit, codeKey) {
-      const display = jsPsych.getDisplayElement();
+    // A screen shown without running the timeline has no display element, and goes in the page.
+    function mountEndScreen(html) {
       const screen = document.createElement("div");
       screen.id = "terminal-screen";
       screen.className = "jspsych-content";
-      screen.innerHTML = `${exitMessage(exit)}
+      screen.innerHTML = html;
+      const display = jsPsych.getDisplayElement();
+      if (display) {
+        display.style.display = "none";
+        display.after(screen);
+      } else {
+        document.body.classList.add("jspsych-display-element");
+        document.body.append(screen);
+      }
+      return screen;
+    }
+
+    // The terminal screen shows the exit message and the submit controls at once, and never waits
+    // on a save. The status line follows the saves and gives up waiting after SAVE_STATUS_BUDGET_MS.
+    function showTerminalScreen(exit, codeKey, messageHtml) {
+      mountEndScreen(`${messageHtml}
         <p id="save-status" style="font-size:0.9em;color:#666">Saving your responses…</p>
         ${submissionBlockHTML(codeKey)}
         ${onJatos ? "" : `<p style="font-size:0.85em;color:#666">Researcher tools:
-          <button id="dl" type="button">Download data (JSON)</button></p>`}`;
-      display.style.display = "none";
-      display.after(screen);
-      document.getElementById("prolific-submit")?.addEventListener("click", () =>
-        submitToProlific(codeKey, exit === "complete"),
-      );
+          <button id="dl" type="button">Download data (JSON)</button></p>`}`);
+      wireSubmit(codeKey, exit === "complete");
       document.getElementById("dl")?.addEventListener("click", () =>
         jsPsych.data.get().localSave("json", "reference-game-hawkins-data.json"),
       );
@@ -1338,6 +1448,25 @@
       });
     }
 
+    // An end screen shown without playing: this tab's own end screen again after a reload, or a
+    // second attempt with a Prolific ID that already has one. It saves nothing, and submitting ends
+    // the JATOS study result with `jatosMessage` in its log instead of a data set.
+    function showSavedEndScreen(messageHtml, codeKey, successful, statusText, jatosMessage) {
+      mountEndScreen(`${messageHtml}
+        ${statusText ? `<p id="save-status" style="font-size:0.9em;color:#666">${statusText}</p>` : ""}
+        ${submissionBlockHTML(codeKey)}`);
+      wireSubmit(codeKey, successful, { withData: false, message: jatosMessage });
+    }
+
+    const ALREADY_FINISHED_HTML = `<h2>You have already finished this study</h2>
+      <p>This Prolific ID has already reached the end of the study, so it can't be taken again.
+         Your completion code is below.</p>`;
+    const ALREADY_OPEN_HTML = `<h2>This study is already open somewhere else</h2>
+      <p>This Prolific ID has already started the study in another tab or browser, so it can't be
+         started again here. If that window is still open, please go back to it.</p>
+      <p>If you closed it, the game has ended for you and can't be rejoined.
+         <strong>You will still be paid for the time you spent.</strong></p>`;
+
     // The last trial: it records the outcome, so the extension's final save (which starts when the
     // timeline ends) includes it, and puts up the terminal screen.
     const terminalScreen = {
@@ -1345,10 +1474,15 @@
       func: () => {
         const { exit, codeKey } = Hawkins.exitFor({ reloaded, noMatchReason, interruption });
         recordOutcome(exit);
+        stopLeaveWarning();
+        const messageHtml = exitMessage(exit);
+        // From here on, a reload shows this same screen and code again and saves nothing more.
+        if (tabStorage) Hawkins.saveFinalScreen(tabStorage, { exit, codeKey, html: messageHtml });
+        finishProlificAttempt(exit, codeKey);
         // Leave the group, so a partner still waiting sees this participant as gone. There is no
         // session to leave when connect() failed.
         if (jsPsych.multiplayer.status) jsPsych.multiplayer.disconnect();
-        showTerminalScreen(exit, codeKey);
+        showTerminalScreen(exit, codeKey, messageHtml);
         return exit;
       },
     };
@@ -1363,16 +1497,6 @@
           new jsPsychAdapterMultiplayerLocal();
     }
 
-    // Set once this tab has joined a session. A reload then skips the instructions and quiz it has
-    // already passed, so a participant who reloads mid-game reaches the reload exit straight away.
-    const CONNECTED_KEY = "hawkins-connected";
-    let resumed = false;
-    try {
-      resumed = sessionStorage.getItem(CONNECTED_KEY) === "1";
-    } catch {
-      // Storage unavailable: a reload replays the instructions before reaching the reload exit.
-    }
-
     async function connectSession() {
       try {
         await jsPsych.multiplayer.connect(adapter(), {
@@ -1385,15 +1509,17 @@
         return { connection: noMatchReason };
       }
       try {
-        sessionStorage.setItem(CONNECTED_KEY, "1");
+        tabStorage?.setItem(CONNECTED_KEY, "1");
       } catch {
-        // See `resumed` above.
+        // See `resumed`.
       }
 
       participantId = jsPsych.multiplayer.participantId;
       dyadId = jsPsych.multiplayer.sessionId;
 
-      if (jsPsych.multiplayer.restarted) {
+      // A tab that had already connected before this load is a reload, even if the adapter does not
+      // report a restart; it runs without DataPipe (datapipeEnabled), so it must not play on.
+      if (jsPsych.multiplayer.restarted || resumed) {
         reloaded = true;
         // A tab reloaded at a pair barrier still has its ready flags from before the reload, and
         // is briefly connected again before it leaves; withdraw them so the partner cannot start on
@@ -1407,6 +1533,7 @@
         }
         return { connection: "restarted" };
       }
+      startLeaveWarning();
 
       const ids = SHAPES.map((s) => s.id);
       const shuffle = (key, array) => jsPsych.multiplayer.shuffle(key, array);
@@ -1464,6 +1591,25 @@
         study_id: prolific.study,
         session_id: prolific.session,
       });
+
+      // This tab already reached its end screen: show it again, with the same code, and save nothing.
+      if (finalScreen) {
+        showSavedEndScreen(finalScreen.html, finalScreen.codeKey, finalScreen.exit === "complete",
+          "Your responses were already saved.", "End screen shown again after a reload");
+        return;
+      }
+      // Another tab or browser already has this Prolific ID. It never joins a group or saves data.
+      const claim = await claimProlificAttempt();
+      if (claim.status === "finished" && Object.hasOwn(CONFIG.COMPLETION_CODES, claim.codeKey ?? "")) {
+        showSavedEndScreen(ALREADY_FINISHED_HTML, claim.codeKey, false, null,
+          "Second attempt with a Prolific ID that already finished");
+        return;
+      }
+      if (claim.status === "finished" || claim.status === "in_progress") {
+        showSavedEndScreen(ALREADY_OPEN_HTML, "reloaded", false, null,
+          "Second attempt with a Prolific ID that is already in the study");
+        return;
+      }
 
       await jsPsych.run([
         preloadTrial,
