@@ -349,12 +349,21 @@
   // message and completion code again instead of the reload exit, and saves nothing more.
   const FINAL_SCREEN_KEY = "hawkins-final-screen";
 
-  function saveFinalScreen(storage, { exit, codeKey, html }) {
+  function saveFinalScreen(storage, { exit, codeKey, html, saveStatus }) {
     try {
-      storage.setItem(FINAL_SCREEN_KEY, JSON.stringify({ exit, codeKey, html }));
+      storage.setItem(FINAL_SCREEN_KEY, JSON.stringify({ exit, codeKey, html, saveStatus }));
       return true;
     } catch {
       return false;
+    }
+  }
+
+  function restoredSaveMessage(status) {
+    switch (status) {
+      case "saved": return "Your responses were already saved.";
+      case "failed": return "The final upload was not accepted. Please submit anyway and message the researcher.";
+      case "skipped": return "No upload was configured for this run.";
+      default: return "The final upload could not be confirmed. Please submit anyway and message the researcher.";
     }
   }
 
@@ -510,6 +519,7 @@
     FINAL_SCREEN_KEY,
     saveFinalScreen,
     loadFinalScreen,
+    restoredSaveMessage,
     ATTEMPT_KEY_PREFIX,
     attemptKey,
     claimAttempt,

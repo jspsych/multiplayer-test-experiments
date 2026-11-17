@@ -498,19 +498,17 @@
     const pipeSaved = datapipeEnabled
       ? new Promise((resolve) => { resolvePipeSave = resolve; })
       : Promise.resolve({ skipped: true });
+    const pipeParams = {
+      experiment_id: CONFIG.DATAPIPE_EXPERIMENT_ID,
+      // Keep participant and dyad IDs out of DataPipe's staging metadata.
+      filename: () => `${jsPsych.randomization.randomID(32)}.json`,
+      format: "json",
+      on_save: (result) => resolvePipeSave?.(result),
+    };
     const jsPsych = initJsPsych({
       extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,
-        params: {
-          experiment_id: CONFIG.DATAPIPE_EXPERIMENT_ID,
-          // An opaque filename keeps Prolific, participant, and dyad IDs out of DataPipe's staging
-          // metadata; they remain in the saved trial rows. The extension resolves it once, at the
-          // start. randomID, unlike the Web Crypto UUID API, also works outside a secure context.
-          filename: () => `${jsPsych.randomization.randomID(32)}.json`,
-          format: "json",
-          enabled: datapipeEnabled,
-          on_save: (result) => resolvePipeSave?.(result),
-        },
+        params: { ...pipeParams, enabled: datapipeEnabled && !onJatos },
       }],
     });
 
@@ -612,9 +610,11 @@
     const JatosSink = onJatos
       ? Hawkins.createJatosSink(jatos, () => jsPsych.data.get().json())
       : null;
+    let admittedToPairing = false;
+    let duplicateAttempt = null;
 
     function saveProgress() {
-      JatosSink?.submit();
+      if (admittedToPairing) JatosSink?.submit();
     }
 
     // ---- Prolific -------------------------------------------------------------------------------
@@ -1500,7 +1500,10 @@
       Promise.all([JatosSink ? JatosSink.submit() : { skipped: true }, pipeSaved]).then((results) => {
         settled = true;
         clearTimeout(budget);
-        showSaveStatus(Hawkins.combineSaveResults(results));
+        const result = Hawkins.combineSaveResults(results);
+        const saveStatus = result.skipped ? "skipped" : result.ok ? "saved" : result.timedOut ? "unconfirmed" : "failed";
+        if (tabStorage) Hawkins.saveFinalScreen(tabStorage, { exit, codeKey, html: messageHtml, saveStatus });
+        showSaveStatus(result);
       });
     }
 
@@ -1589,8 +1592,6 @@
         }
         return { connection: "restarted" };
       }
-      startLeaveWarning();
-
       const ids = SHAPES.map((s) => s.id);
       const shuffle = (key, array) => jsPsych.multiplayer.shuffle(key, array);
       try {
@@ -1627,9 +1628,28 @@
     const connectTrial = {
       type: jsPsychCallFunction,
       async: true,
-      func: (done) => {
+      func: async (done) => {
         jsPsych.getDisplayElement().innerHTML = "<p>Connecting…</p>";
-        connectSession().then(done);
+        const claim = await claimProlificAttempt();
+        if (claim.status === "finished" || claim.status === "in_progress") {
+          duplicateAttempt = claim;
+          jsPsych.abortExperiment();
+          return;
+        }
+        admittedToPairing = true;
+        startLeaveWarning();
+        if (onJatos && datapipeEnabled) {
+          // DataPipe 0.2.0 skips hook installation when initialized with enabled: false.
+          // Start staging here. Its final save still includes the earlier onboarding rows.
+          try {
+            await jsPsych.extensions.pipe.initialize(pipeParams);
+          } catch (error) {
+            console.error("Could not start DataPipe", error);
+            resolvePipeSave?.({ ok: false });
+          }
+        }
+        saveProgress();
+        done(await connectSession());
       },
     };
 
@@ -1651,19 +1671,7 @@
       // This tab already reached its end screen: show it again, with the same code, and save nothing.
       if (finalScreen) {
         showSavedEndScreen(finalScreen.html, finalScreen.codeKey, finalScreen.exit === "complete",
-          "Your responses were already saved.", "End screen shown again after a reload");
-        return;
-      }
-      // Another tab or browser already has this Prolific ID. It never joins a group or saves data.
-      const claim = await claimProlificAttempt();
-      if (claim.status === "finished" && Object.hasOwn(CONFIG.COMPLETION_CODES, claim.codeKey ?? "")) {
-        showSavedEndScreen(ALREADY_FINISHED_HTML, claim.codeKey, false, null,
-          "Second attempt with a Prolific ID that already finished");
-        return;
-      }
-      if (claim.status === "finished" || claim.status === "in_progress") {
-        showSavedEndScreen(ALREADY_OPEN_HTML, "reloaded", false, null,
-          "Second attempt with a Prolific ID that is already in the study");
+          Hawkins.restoredSaveMessage(finalScreen.saveStatus), "End screen shown again after a reload");
         return;
       }
 
@@ -1682,6 +1690,14 @@
         gameLoop,
         terminalScreen,
       ]);
+      if (duplicateAttempt?.status === "finished" &&
+          Object.hasOwn(CONFIG.COMPLETION_CODES, duplicateAttempt.codeKey ?? "")) {
+        showSavedEndScreen(ALREADY_FINISHED_HTML, duplicateAttempt.codeKey, false, null,
+          "Second attempt with a Prolific ID that already finished");
+      } else if (duplicateAttempt) {
+        showSavedEndScreen(ALREADY_OPEN_HTML, "reloaded", false, null,
+          "Second attempt with a Prolific ID that is already in the study");
+      }
     }
 
     if (onJatos) jatos.onLoad(start);
