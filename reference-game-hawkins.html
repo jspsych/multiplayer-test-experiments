@@ -416,13 +416,16 @@
     // Set once this tab has joined a session. A reload then skips the instructions and quiz it has
     // already passed, and always reaches the reload exit: the game carried on without it.
     const CONNECTED_KEY = "hawkins-connected";
-    const resumed = (() => {
+    const PIPE_STARTED_KEY = "hawkins-pipe-started";
+    function hasTabMarker(key) {
       try {
-        return tabStorage?.getItem(CONNECTED_KEY) === "1";
+        return tabStorage?.getItem(key) === "1";
       } catch {
-        return false; // Storage unavailable: a reload replays the instructions before reaching the reload exit.
+        return false;
       }
-    })();
+    }
+    const resumed = hasTabMarker(CONNECTED_KEY);
+    const stagedBeforeConnection = !resumed && hasTabMarker(PIPE_STARTED_KEY);
     // The end screen this tab already reached, if any. start() shows it again instead of the game.
     const finalScreen = tabStorage ? Hawkins.loadFinalScreen(tabStorage) : null;
 
@@ -432,6 +435,7 @@
       Boolean(CONFIG.DATAPIPE_EXPERIMENT_ID) &&
       (onJatos || new URLSearchParams(location.search).get("datapipe") === "1") &&
       !resumed &&
+      !stagedBeforeConnection &&
       !finalScreen;
 
     // Settles with the extension's final-save result. The extension makes that save after the
@@ -451,7 +455,7 @@
     const jsPsych = initJsPsych({
       extensions: [{ type: jsPsychExtensionPresenceCheck }, {
         type: jsPsychExtensionPipe,
-        params: { ...pipeParams, enabled: datapipeEnabled && !onJatos },
+        params: { enabled: false },
       }],
     });
 
@@ -1601,9 +1605,14 @@
         }
         admittedToPairing = true;
         startLeaveWarning();
-        if (onJatos && datapipeEnabled) {
+        if (datapipeEnabled) {
           // DataPipe 0.2.0 skips hook installation when initialized with enabled: false.
           // Start staging here. Its final save still includes the earlier onboarding rows.
+          try {
+            tabStorage?.setItem(PIPE_STARTED_KEY, "1");
+          } catch (error) {
+            console.warn("Could not mark DataPipe staging in this tab", error);
+          }
           try {
             await jsPsych.extensions.pipe.initialize(pipeParams);
           } catch (error) {
@@ -1635,6 +1644,17 @@
       if (finalScreen) {
         showSavedEndScreen(finalScreen.html, finalScreen.codeKey, finalScreen.exit === "complete",
           Hawkins.restoredSaveMessage(finalScreen.saveStatus), "End screen shown again after a reload");
+        return;
+      }
+      // A reload after staging began but before connect resolved has no completed connection
+      // to resume. Preserve any data already written by the previous page.
+      if (stagedBeforeConnection) {
+        const { exit, codeKey } = Hawkins.exitFor({ reloaded: true });
+        const messageHtml = exitMessage(exit);
+        Hawkins.saveFinalScreen(tabStorage, { exit, codeKey, html: messageHtml });
+        showSavedEndScreen(messageHtml, codeKey, false, Hawkins.restoredSaveMessage(),
+          "Page reloaded while connecting");
+        if ((await claimProlificAttempt()).status === "claimed") finishProlificAttempt(exit, codeKey);
         return;
       }
 

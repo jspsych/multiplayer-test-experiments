@@ -180,7 +180,9 @@ test("finishing never overwrites another attempt's claim and never rejects", asy
 const prolificSource = between("    // ---- Prolific", "    // ---- Timeline");
 const startSource = between("    async function start()", "    if (onJatos) jatos.onLoad(start);");
 
-function runStart({ finalScreen = null, claim = { status: "claimed" }, finishOnboarding = true } = {}) {
+function runStart({
+  finalScreen = null, claim = { status: "claimed" }, finishOnboarding = true, storage = memoryStorage(),
+} = {}) {
   const shown = [];
   const events = [];
   const context = vm.createContext({
@@ -189,6 +191,12 @@ function runStart({ finalScreen = null, claim = { status: "claimed" }, finishOnb
     Hawkins: globalThis.Hawkins,
     prolific: null,
     resumed: false,
+    tabStorage: {
+      getItem: (key) => storage.getItem(key),
+      setItem: (key, value) => { events.push("marker"); storage.setItem(key, value); },
+    },
+    PIPE_STARTED_KEY: "hawkins-pipe-started",
+    stagedBeforeConnection: storage.getItem("hawkins-pipe-started") === "1",
     duplicateAttempt: null,
     admittedToPairing: false,
     datapipeEnabled: true,
@@ -199,6 +207,8 @@ function runStart({ finalScreen = null, claim = { status: "claimed" }, finishOnb
     ALREADY_OPEN_HTML: "<h2>already open</h2>",
     studyLinkParams: () => new URLSearchParams("PROLIFIC_PID=abc"),
     claimProlificAttempt: async () => { events.push("claim"); return claim; },
+    finishProlificAttempt: (exit, code) => events.push(`finish:${exit}:${code}`),
+    exitMessage: () => "<h2>Reloaded</h2>",
     startLeaveWarning: () => events.push("warn"),
     saveProgress: () => events.push("save"),
     connectSession: async () => events.push("connect"),
@@ -261,13 +271,24 @@ test("a repeat attempt sees the finished code or the already-open screen and nev
 test("a first attempt, or one the server could not check, runs the game", async () => {
   for (const status of ["claimed", "skipped", "unavailable"]) {
     const { shown, events } = await runStart({ claim: { status } });
-    assert.deepEqual(events, ["onboarding", "claim", "warn", "pipe", "save", "connect"], status);
+    assert.deepEqual(events, ["onboarding", "claim", "warn", "marker", "pipe", "save", "connect"], status);
     assert.deepEqual(shown, []);
   }
 });
 
 test("leaving during onboarding does not claim the ID or start saving", async () => {
   assert.deepEqual((await runStart({ finishOnboarding: false })).events, ["onboarding"]);
+});
+
+test("a reload after staging starts but before connecting preserves the previous page's data", async () => {
+  const storage = memoryStorage([["hawkins-pipe-started", "1"]]);
+  const { shown, events } = await runStart({ storage });
+  assert.deepEqual(events, ["marker", "claim", "finish:reloaded:reloaded"]);
+  assert.deepEqual(shown[0].slice(0, 3), ["<h2>Reloaded</h2>", "reloaded", false]);
+  assert.match(shown[0][3], /could not be confirmed/);
+  assert.deepEqual(loadFinalScreen(storage), {
+    exit: "reloaded", codeKey: "reloaded", html: "<h2>Reloaded</h2>",
+  });
 });
 
 function prolificContext({ pid = "abc", onJatos = true, batch = sharedBatch().client(), storage = memoryStorage() } = {}) {
