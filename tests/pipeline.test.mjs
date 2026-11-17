@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import "../hawkins.js";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const page = readFileSync(join(root, "reference-game-hawkins.html"), "utf8");
@@ -20,7 +21,7 @@ test("Hawkins registers one pinned Pipe extension and no competing DataPipe save
   assert.match(page, /src="vendor\/extension-pipe\.js"/);
   assert.match(vendor, /PIPE_EXTENSION_VERSION = "0\.2\.0"/);
   assert.equal((page.match(/type: jsPsychExtensionPipe/g) ?? []).length, 1);
-  assert.match(page, /enabled: datapipeEnabled,/);
+  assert.match(page, /params: \{ enabled: false \}/);
   assert.match(page, /format: "json"/);
   assert.doesNotMatch(page + hawkins, /createPipeline|Pipeline\.save|api\/data\//);
   // A top-level crypto.randomUUID() throws outside a secure context, before anything renders.
@@ -31,18 +32,36 @@ test("Hawkins registers one pinned Pipe extension and no competing DataPipe save
 
 test("DataPipe is on only on JATOS or with an explicit ?datapipe=1 opt-in", () => {
   const decl = page.slice(page.indexOf("    const datapipeEnabled ="), page.indexOf("    let resolvePipeSave"));
-  const enabled = ({ onJatos, search, id = "wE2Zlitn0uhu" }) =>
+  const enabled = ({
+    onJatos, search, id = "wE2Zlitn0uhu", resumed = false, stagedBeforeConnection = false, finalScreen = null,
+  }) =>
     vm.runInNewContext(`${decl}; datapipeEnabled`, {
       CONFIG: { DATAPIPE_EXPERIMENT_ID: id },
       onJatos,
       location: { search },
       URLSearchParams,
+      resumed,
+      stagedBeforeConnection,
+      finalScreen,
     });
   assert.equal(enabled({ onJatos: false, search: "?mp_session=abc" }), false);
   assert.equal(enabled({ onJatos: false, search: "?mp_session=abc&datapipe=0" }), false);
   assert.equal(enabled({ onJatos: false, search: "?mp_session=abc&datapipe=1" }), true);
   assert.equal(enabled({ onJatos: true, search: "" }), true);
   assert.equal(enabled({ onJatos: true, search: "", id: "" }), false);
+  // One DataPipe file per attempt: a reloaded or finished tab never starts a second one.
+  assert.equal(enabled({ onJatos: true, search: "", resumed: true }), false);
+  assert.equal(enabled({ onJatos: true, search: "", stagedBeforeConnection: true }), false);
+  assert.equal(enabled({ onJatos: false, search: "?datapipe=1", stagedBeforeConnection: true }), false);
+  assert.equal(enabled({ onJatos: true, search: "", finalScreen: { exit: "complete" } }), false);
+});
+
+test("the tab state read at load comes before DataPipe is configured", () => {
+  const at = (s) => page.indexOf(s);
+  assert(at("const tabStorage =") < at("const datapipeEnabled ="));
+  assert(at("const resumed =") < at("const datapipeEnabled ="));
+  assert(at("const finalScreen = tabStorage ? Hawkins.loadFinalScreen(tabStorage) : null;") < at("const datapipeEnabled ="));
+  assert(at("const datapipeEnabled =") < at("const jsPsych = initJsPsych("));
 });
 
 // A minimal DOM: the display element, the screen the page appends beside it, and lookups by id of
@@ -80,10 +99,17 @@ function setup({ pipe = new Promise(() => {}), jatos = null, exit = "connection_
   const timers = [];
   const location = { href: "", search: "" };
   const rows = [];
+  const tab = new Map();
+  const listeners = new Set();
   const context = vm.createContext({
     console,
     location,
-    window: { location },
+    window: {
+      location,
+      addEventListener: (type, fn) => listeners.add(`${type}:${fn.name}`),
+      removeEventListener: (type, fn) => listeners.delete(`${type}:${fn.name}`),
+    },
+    tabStorage: { getItem: (k) => tab.get(k) ?? null, setItem: (k, v) => tab.set(k, String(v)) },
     jsPsychCallFunction: {},
     document: dom.document,
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
@@ -129,6 +155,9 @@ function setup({ pipe = new Promise(() => {}), jatos = null, exit = "connection_
     submit: () => dom.document.getElementById("prolific-submit").click(),
     disconnected: () => context.jsPsych.multiplayer.status === null,
     location,
+    tab,
+    listeners,
+    startLeaveWarning: () => vm.runInContext("startLeaveWarning()", context),
     outcome: () => rows.find((r) => r.ended_reason),
     async elapse(ms) {
       await flush();
@@ -172,7 +201,8 @@ test("on JATOS, a hung JATOS submit and a hung pipe still allow submission", asy
   assert.match(s.screen().innerHTML, /Game complete!/);
   assert.doesNotMatch(s.screen().innerHTML, /Researcher tools/);
   s.submit();
-  assert.equal(calls.length, 1);
+  s.submit();
+  assert.equal(calls.length, 1, "a second click does not end the study result again");
   assert.equal(calls[0][0], "https://app.prolific.com/submissions/complete?cc=C1");
   assert.equal(calls[0][2], true);
   await s.elapse(3000);
@@ -209,4 +239,20 @@ test("a prompt upload reports its result and cancels the budget message", async 
   off.run();
   await off.flush();
   assert.match(off.status(), /DataPipe is off for local runs/);
+});
+
+test("the terminal screen keeps its code immediately and records a confirmed save separately", async () => {
+  const s = setup({ exit: "complete", pipe: Promise.resolve({ ok: true }) });
+  s.startLeaveWarning();
+  assert.deepEqual([...s.listeners], ["beforeunload:warnBeforeLeaving"]);
+  s.run();
+  assert.deepEqual([...s.listeners], []);
+  const saved = globalThis.Hawkins.loadFinalScreen({ getItem: (k) => s.tab.get(k) ?? null });
+  assert.equal(saved.exit, "complete");
+  assert.equal(saved.codeKey, "complete");
+  assert.equal(saved.saveStatus, undefined);
+  assert.match(saved.html, /Game complete!/);
+  assert.doesNotMatch(saved.html, /prolific-submit/, "the submit controls are rebuilt, not stored");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(globalThis.Hawkins.loadFinalScreen({ getItem: (k) => s.tab.get(k) ?? null }).saveStatus, "saved");
 });

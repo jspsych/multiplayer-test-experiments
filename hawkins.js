@@ -343,6 +343,155 @@
     return { submit };
   }
 
+  // ---- End screen across reloads ----------------------------------------------------------------
+
+  // The end screen a tab reached, kept in that tab's sessionStorage so a reload shows the same
+  // message and completion code again instead of the reload exit, and saves nothing more.
+  const FINAL_SCREEN_KEY = "hawkins-final-screen";
+
+  function saveFinalScreen(storage, { exit, codeKey, html, saveStatus }) {
+    try {
+      storage.setItem(FINAL_SCREEN_KEY, JSON.stringify({ exit, codeKey, html, saveStatus }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function restoredSaveMessage(status) {
+    switch (status) {
+      case "saved": return "Your responses were already saved.";
+      case "failed": return "The final upload was not accepted. Please submit anyway and message the researcher.";
+      case "skipped": return "No upload was configured for this run.";
+      default: return "The final upload could not be confirmed. Please submit anyway and message the researcher.";
+    }
+  }
+
+  function loadFinalScreen(storage) {
+    try {
+      const saved = JSON.parse(storage.getItem(FINAL_SCREEN_KEY));
+      return isObject(saved) && typeof saved.exit === "string" && typeof saved.codeKey === "string" &&
+        typeof saved.html === "string"
+        ? saved
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ---- One attempt per Prolific ID ----------------------------------------------------------------
+
+  // Every study run in a JATOS batch shares the batch session on the server, so a Prolific ID
+  // claimed there is seen from any browser or tab, unlike JATOS's own one-run-per-browser cookie.
+  // Every participant's browser receives the whole batch session, so keys hold a hash of the
+  // Prolific ID, never the ID itself.
+  const ATTEMPT_KEY_PREFIX = "attempt_";
+
+  // 32 hex characters of SHA-256, or of two 53-bit string hashes where Web Crypto is unavailable
+  // (it needs a secure context).
+  async function attemptKey(prolificId, subtle = globalThis.crypto?.subtle) {
+    const text = `hawkins:${prolificId}`;
+    if (subtle) {
+      const digest = await subtle.digest("SHA-256", new TextEncoder().encode(text));
+      const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+      return ATTEMPT_KEY_PREFIX + hex.slice(0, 32);
+    }
+    const hash53 = (seed) => {
+      let h1 = 0xdeadbeef ^ seed;
+      let h2 = 0x41c6ce57 ^ seed;
+      for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        h1 = Math.imul(h1 ^ c, 2654435761);
+        h2 = Math.imul(h2 ^ c, 1597334677);
+      }
+      h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+      h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+      return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, "0");
+    };
+    return ATTEMPT_KEY_PREFIX + (hash53(1) + hash53(2) + hash53(3)).slice(0, 32);
+  }
+
+  // A claim record. The `by_<token>` field puts the token in a path, so the server can check who
+  // holds the claim (batch.confirm).
+  const claimRecord = (token, fields) => ({ attempt: token, [`by_${token}`]: true, ...fields, at: Date.now() });
+
+  function otherAttempt(record) {
+    return record.state === "ended"
+      ? { status: "finished", exit: record.exit, codeKey: record.code_key }
+      : { status: "in_progress" };
+  }
+
+  // Claims `key` for this attempt. `batch` is the JATOS batch session in the browser:
+  //   get(key)              this browser's copy of the key
+  //   set(key, value)       → Promise, a write (rejected if made from an out-of-date version)
+  //   has(key, field)       → Promise<boolean>, whether the server's own copy has key.field
+  // `token` names the attempt and survives a reload of its tab, so a reload is the same attempt,
+  // and a second tab or browser is not. Resolves with
+  //   { status: "claimed" }                       first visit, or this attempt reloading
+  //   { status: "finished", exit, codeKey }       another attempt already reached its end screen
+  //   { status: "in_progress" }                   another attempt holds the claim
+  //   { status: "unavailable", error }            the batch session could not settle the claim
+  // Neither this browser's copy nor an acknowledged write can be trusted on its own: with writes
+  // from several browsers at once, JATOS can acknowledge a write that a concurrent one then
+  // overwrites, and a browser that opened its channel mid-write can hold a copy missing that
+  // write. So each writer waits `settleMs` and asks the server: its own claim stored means it holds
+  // the key; another claim stored means someone else does; nothing stored means its write was
+  // lost, and it writes again.
+  async function claimAttempt(batch, key, token, {
+    attempts = 5, settleMs = 1000, wait = (ms) => new Promise((r) => setTimeout(r, ms)),
+  } = {}) {
+    let error = null;
+    for (let i = 0; i < attempts; i++) {
+      const record = batch.get(key);
+      // After a lost write, this browser's copy still shows that write, so it is not a reload.
+      if (isObject(record) && (i === 0 || record.attempt !== token)) {
+        return record.attempt === token ? { status: "claimed" } : otherAttempt(record);
+      }
+      try {
+        await batch.set(key, claimRecord(token, { state: "started" }));
+      } catch (err) {
+        error = err;
+        await wait(250 * (i + 1));
+        continue;
+      }
+      await wait(settleMs);
+      try {
+        if (await batch.has(key, `by_${token}`)) return { status: "claimed" };
+        if (await batch.has(key, "attempt")) {
+          await wait(300); // let the holder's record reach this browser's copy
+          const holder = batch.get(key);
+          return isObject(holder) && holder.attempt !== token ? otherAttempt(holder) : { status: "in_progress" };
+        }
+        error = new Error("the claim was lost; writing it again");
+      } catch (err) {
+        return { status: "unavailable", error: String(err?.message ?? err) };
+      }
+    }
+    return { status: "unavailable", error: String(error?.message ?? error) };
+  }
+
+  // Marks this attempt's claim as ended, with the exit it reached, so another browser with the same
+  // Prolific ID is shown that completion code. Checks with the server that the write was kept (see
+  // claimAttempt) and tries again if not. Never overwrites another attempt's claim, and never
+  // rejects: the end screen does not depend on it.
+  async function finishAttempt(batch, key, token, { exit, codeKey }, {
+    attempts = 3, settleMs = 500, wait = (ms) => new Promise((r) => setTimeout(r, ms)),
+  } = {}) {
+    const marker = `ended_${token}`;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const record = batch.get(key);
+        if (isObject(record) && record.attempt !== token) return false;
+        await batch.set(key, claimRecord(token, { state: "ended", exit, code_key: codeKey, [marker]: true }));
+        await wait(settleMs);
+        if (await batch.has(key, marker)) return true;
+      } catch {
+        await wait(250 * (i + 1));
+      }
+    }
+    return false;
+  }
+
   // Combines the results of the save targets in use into one status for the terminal screen.
   // Targets that are not configured report `skipped` and are ignored.
   function combineSaveResults(results) {
@@ -367,6 +516,14 @@
     EXIT_CODES,
     createJatosSink,
     combineSaveResults,
+    FINAL_SCREEN_KEY,
+    saveFinalScreen,
+    loadFinalScreen,
+    restoredSaveMessage,
+    ATTEMPT_KEY_PREFIX,
+    attemptKey,
+    claimAttempt,
+    finishAttempt,
     roundHasSubmission,
     submissionResult,
     PLACEHOLDER_CODES,

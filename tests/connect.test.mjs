@@ -34,7 +34,7 @@ function setup({
     Hawkins: globalThis.Hawkins,
     jsPsychAdapterMultiplayerLocal: class {},
     jsPsychCallFunction: {},
-    sessionStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) },
+    tabStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) },
     console: { error: () => {} },
     jsPsych: {
       getDisplayElement: () => ({}),
@@ -52,6 +52,7 @@ function setup({
   });
   vm.runInContext(
     "let noMatchReason = null, reloaded = false, participantId = null, dyadId = null, SCHEDULE = [], PRACTICE_SCHEDULE = [];\n" +
+      `const CONNECTED_KEY = "hawkins-connected", resumed = tabStorage.getItem(CONNECTED_KEY) === "1";\n` +
       "const gameLoop = { timeline_variables: SCHEDULE }, practiceLoop = { timeline_variables: PRACTICE_SCHEDULE };\n" +
       `${source}\nglobalThis.state = () => ({ noMatchReason, reloaded, participantId, SCHEDULE, PRACTICE_SCHEDULE, gameLoop, practiceLoop, resumed });`,
     context,
@@ -170,6 +171,13 @@ test("a reloaded tab is detected as a restart, skips the instructions and withdr
   assert.deepEqual(JSON.parse(JSON.stringify(run.updates)), [
     { data: { ready: false, ready_for_main: false }, options: { scope: "session" } },
   ]);
+});
+
+test("a tab that had connected before this load takes the reload exit even without a reported restart", async () => {
+  const run = setup({ restarted: false, stored: "1" });
+  assert.deepEqual(await run.connect(), { connection: "restarted" });
+  assert.equal(run.state().reloaded, true);
+  assert.equal(run.state().SCHEDULE.length, 0);
 });
 
 test("everything between connecting and the terminal screen skips after a restart", () => {
