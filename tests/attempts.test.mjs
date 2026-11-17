@@ -180,52 +180,77 @@ test("finishing never overwrites another attempt's claim and never rejects", asy
 const prolificSource = between("    // ---- Prolific", "    // ---- Timeline");
 const startSource = between("    async function start()", "    if (onJatos) jatos.onLoad(start);");
 
-function runStart({ finalScreen = null, claim = { status: "claimed" } } = {}) {
+function runStart({ finalScreen = null, claim = { status: "claimed" }, finishOnboarding = true } = {}) {
   const shown = [];
-  let ran = false;
+  const events = [];
   const context = vm.createContext({
     Object,
     finalScreen,
+    Hawkins: globalThis.Hawkins,
     prolific: null,
     resumed: false,
+    duplicateAttempt: null,
+    admittedToPairing: false,
+    datapipeEnabled: true,
+    onJatos: true,
+    pipeParams: {},
     CONFIG: { COMPLETION_CODES: { complete: "C1", reloaded: "C5" } },
     ALREADY_FINISHED_HTML: "<h2>already finished</h2>",
     ALREADY_OPEN_HTML: "<h2>already open</h2>",
     studyLinkParams: () => new URLSearchParams("PROLIFIC_PID=abc"),
-    claimProlificAttempt: async () => claim,
+    claimProlificAttempt: async () => { events.push("claim"); return claim; },
+    startLeaveWarning: () => events.push("warn"),
+    saveProgress: () => events.push("save"),
+    connectSession: async () => events.push("connect"),
+    jsPsychCallFunction: {},
     showSavedEndScreen: (...args) => shown.push(args),
-    jsPsych: { data: { addProperties: () => {} }, run: async () => { ran = true; } },
+    jsPsych: {
+      data: { addProperties: () => {} },
+      extensions: { pipe: { initialize: async () => events.push("pipe") } },
+      getDisplayElement: () => ({}),
+      abortExperiment: () => events.push("abort"),
+      run: async (timeline) => {
+        events.push("onboarding");
+        if (finishOnboarding) await timeline[3].func(() => {});
+      },
+    },
     URLSearchParams,
     ...Object.fromEntries(
-      [...startSource.slice(startSource.indexOf("jsPsych.run(")).matchAll(/^\s+(?:\.\.\.\(resumed \? \[\] : \[)?(\w+)/gm)]
+      [...startSource.slice(startSource.indexOf("jsPsych.run("), startSource.indexOf("      ]);")).matchAll(/^\s+(?:\.\.\.\(resumed \? \[\] : \[)?(\w+)/gm)]
         .map((m) => [m[1], {}]),
     ),
     generalInstructions: {},
     comprehensionLoop: {},
   });
+  vm.runInContext(between("    const connectTrial =", "    // ---- Start"), context);
   vm.runInContext(startSource, context);
-  return context.start().then(() => ({ shown, ran }));
+  return context.start().then(() => ({ shown, events }));
 }
 
 test("a tab that already reached its end screen shows it again and never runs the game", async () => {
-  const { shown, ran } = await runStart({
-    finalScreen: { exit: "complete", codeKey: "complete", html: "<h2>Game complete!</h2>" },
-    claim: { status: "in_progress" },
-  });
-  assert.equal(ran, false);
-  assert.deepEqual(shown, [[
-    "<h2>Game complete!</h2>", "complete", true, "Your responses were already saved.", "End screen shown again after a reload",
-  ]]);
+  for (const [saveStatus, message] of [
+    ["saved", /were already saved/],
+    ["failed", /not accepted/],
+    ["skipped", /No upload was configured/],
+    [undefined, /could not be confirmed/],
+  ]) {
+    const { shown, events } = await runStart({
+      finalScreen: { exit: "complete", codeKey: "complete", html: "<h2>Game complete!</h2>", saveStatus },
+    });
+    assert.deepEqual(events, []);
+    assert.deepEqual(shown[0].slice(0, 3), ["<h2>Game complete!</h2>", "complete", true]);
+    assert.match(shown[0][3], message);
+  }
 });
 
 test("a repeat attempt sees the finished code or the already-open screen and never runs the game", async () => {
   const finished = await runStart({ claim: { status: "finished", exit: "complete", codeKey: "complete" } });
-  assert.equal(finished.ran, false);
+  assert.deepEqual(finished.events, ["onboarding", "claim", "abort"]);
   assert.equal(finished.shown[0][0], "<h2>already finished</h2>");
   assert.equal(finished.shown[0][1], "complete");
 
   const open = await runStart({ claim: { status: "in_progress" } });
-  assert.equal(open.ran, false);
+  assert.deepEqual(open.events, ["onboarding", "claim", "abort"]);
   assert.deepEqual(open.shown[0].slice(0, 3), ["<h2>already open</h2>", "reloaded", false]);
 
   // A claim naming a code key the page does not have is treated as already open, not rendered.
@@ -235,10 +260,14 @@ test("a repeat attempt sees the finished code or the already-open screen and nev
 
 test("a first attempt, or one the server could not check, runs the game", async () => {
   for (const status of ["claimed", "skipped", "unavailable"]) {
-    const { shown, ran } = await runStart({ claim: { status } });
-    assert.equal(ran, true, status);
+    const { shown, events } = await runStart({ claim: { status } });
+    assert.deepEqual(events, ["onboarding", "claim", "warn", "pipe", "save", "connect"], status);
     assert.deepEqual(shown, []);
   }
+});
+
+test("leaving during onboarding does not claim the ID or start saving", async () => {
+  assert.deepEqual((await runStart({ finishOnboarding: false })).events, ["onboarding"]);
 });
 
 function prolificContext({ pid = "abc", onJatos = true, batch = sharedBatch().client(), storage = memoryStorage() } = {}) {

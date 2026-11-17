@@ -21,7 +21,7 @@ test("Hawkins registers one pinned Pipe extension and no competing DataPipe save
   assert.match(page, /src="vendor\/extension-pipe\.js"/);
   assert.match(vendor, /PIPE_EXTENSION_VERSION = "0\.2\.0"/);
   assert.equal((page.match(/type: jsPsychExtensionPipe/g) ?? []).length, 1);
-  assert.match(page, /enabled: datapipeEnabled,/);
+  assert.match(page, /enabled: datapipeEnabled && !onJatos/);
   assert.match(page, /format: "json"/);
   assert.doesNotMatch(page + hawkins, /createPipeline|Pipeline\.save|api\/data\//);
   // A top-level crypto.randomUUID() throws outside a secure context, before anything renders.
@@ -236,8 +236,8 @@ test("a prompt upload reports its result and cancels the budget message", async 
   assert.match(off.status(), /DataPipe is off for local runs/);
 });
 
-test("the terminal screen keeps its message and code for a reload, and ends the leave warning", () => {
-  const s = setup({ exit: "complete" });
+test("the terminal screen keeps its code immediately and records a confirmed save separately", async () => {
+  const s = setup({ exit: "complete", pipe: Promise.resolve({ ok: true }) });
   s.startLeaveWarning();
   assert.deepEqual([...s.listeners], ["beforeunload:warnBeforeLeaving"]);
   s.run();
@@ -245,6 +245,9 @@ test("the terminal screen keeps its message and code for a reload, and ends the 
   const saved = globalThis.Hawkins.loadFinalScreen({ getItem: (k) => s.tab.get(k) ?? null });
   assert.equal(saved.exit, "complete");
   assert.equal(saved.codeKey, "complete");
+  assert.equal(saved.saveStatus, undefined);
   assert.match(saved.html, /Game complete!/);
   assert.doesNotMatch(saved.html, /prolific-submit/, "the submit controls are rebuilt, not stored");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(globalThis.Hawkins.loadFinalScreen({ getItem: (k) => s.tab.get(k) ?? null }).saveStatus, "saved");
 });
