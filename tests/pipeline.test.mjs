@@ -21,7 +21,7 @@ test("Hawkins registers one pinned Pipe extension and no competing DataPipe save
   assert.match(page, /src="vendor\/extension-pipe\.js"/);
   assert.match(vendor, /PIPE_EXTENSION_VERSION = "0\.2\.0"/);
   assert.equal((page.match(/type: jsPsychExtensionPipe/g) ?? []).length, 1);
-  assert.match(page, /enabled: datapipeEnabled && !onJatos/);
+  assert.match(page, /params: \{ enabled: false \}/);
   assert.match(page, /format: "json"/);
   assert.doesNotMatch(page + hawkins, /createPipeline|Pipeline\.save|api\/data\//);
   // A top-level crypto.randomUUID() throws outside a secure context, before anything renders.
@@ -32,13 +32,16 @@ test("Hawkins registers one pinned Pipe extension and no competing DataPipe save
 
 test("DataPipe is on only on JATOS or with an explicit ?datapipe=1 opt-in", () => {
   const decl = page.slice(page.indexOf("    const datapipeEnabled ="), page.indexOf("    let resolvePipeSave"));
-  const enabled = ({ onJatos, search, id = "wE2Zlitn0uhu", resumed = false, finalScreen = null }) =>
+  const enabled = ({
+    onJatos, search, id = "wE2Zlitn0uhu", resumed = false, stagedBeforeConnection = false, finalScreen = null,
+  }) =>
     vm.runInNewContext(`${decl}; datapipeEnabled`, {
       CONFIG: { DATAPIPE_EXPERIMENT_ID: id },
       onJatos,
       location: { search },
       URLSearchParams,
       resumed,
+      stagedBeforeConnection,
       finalScreen,
     });
   assert.equal(enabled({ onJatos: false, search: "?mp_session=abc" }), false);
@@ -48,6 +51,8 @@ test("DataPipe is on only on JATOS or with an explicit ?datapipe=1 opt-in", () =
   assert.equal(enabled({ onJatos: true, search: "", id: "" }), false);
   // One DataPipe file per attempt: a reloaded or finished tab never starts a second one.
   assert.equal(enabled({ onJatos: true, search: "", resumed: true }), false);
+  assert.equal(enabled({ onJatos: true, search: "", stagedBeforeConnection: true }), false);
+  assert.equal(enabled({ onJatos: false, search: "?datapipe=1", stagedBeforeConnection: true }), false);
   assert.equal(enabled({ onJatos: true, search: "", finalScreen: { exit: "complete" } }), false);
 });
 

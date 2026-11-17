@@ -115,13 +115,14 @@ DataPipe is on only when JATOS serves the page. A local run uploads nothing unle
 with `?datapipe=1` (e.g. `reference-game-hawkins.html?mp_session=…&datapipe=1`); use that only for a
 deliberate test upload, since it writes into the study's Drive folder. Set the ID to an empty string
 to disable DataPipe everywhere. Turn on **Accept new data** in the DataPipe dashboard and verify a
-completed test run in the linked Drive folder before a paid run. On JATOS, staging and progress
-saves begin after the repeat-attempt check, when a participant is ready to pair. The final upload
-includes onboarding rows. The extension submits one JSON file when the jsPsych timeline ends; an abandoned run can yield a
-`.partial.json` file. Each attempt produces at most one file: a tab that reloads after joining a
-game runs with DataPipe off, so a mid-session reload leaves only the `.partial.json` from the page
-the participant left (JATOS still records the reload exit), and a tab that reloads on its end screen
-uploads nothing more. DataPipe stages rows in batches (every 10 rows or 10 seconds, set by
+completed test run in the linked Drive folder before a paid run. Staging and JATOS progress saves
+begin after onboarding and the repeat-attempt check, when a participant is ready to pair. An
+accepted run's first JATOS save and final DataPipe upload include onboarding rows. Leaving during
+onboarding produces no saved rows, which keeps rejected duplicate attempts from uploading data.
+The extension submits one JSON file when the jsPsych timeline ends. If the tab reloads after
+staging starts, including while the connection is pending, the new page skips DataPipe and the
+original page may produce a `.partial.json` file. This relies on tab storage. DataPipe stages
+rows in batches (every 10 rows or 10 seconds, set by
 DataPipe), so a `.partial.json` can omit onboarding and the last few seconds before the tab closed.
 A refused final upload is not retried: the extension hands the staged rows
 to DataPipe as a `.partial.json`, and the end screen asks the participant to
@@ -147,8 +148,10 @@ participant, and dyad IDs remain in the saved rows. JATOS result data is saved s
   workers**. If the batch session cannot be reached, the participant is let in. Batch session
   versioning alone does not stop two browsers from both claiming at once (one write can replace
   the other unseen), so after writing, the page asks the server whether its own claim is the one
-  stored: a JSON Patch `copy` from a field only that tab writes fails on the server if the field
-  is missing. A claim that was lost without anyone else's in its place is written again.
+  stored. The check uses a JSON Patch `copy`, which writes to the shared batch session and fails
+  if the source field is missing. A successful check confirms the claim at that moment. It does
+  not reserve the claim, so this is a best-effort duplicate check. A claim that was lost without
+  anyone else's in its place is written again.
 - **Submitting twice.** The submit button acts once, and JATOS saves replace the result data rather
   than adding to it.
 
