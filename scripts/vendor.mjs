@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 
 // Exact head of jspsych/jspsych-multiplayer PR #123 (opt-in chat_autofocus and chat_type_to_focus).
 // Provisional adoption: upstream PR is still draft; review before merging this pin.
-const MULTIPLAYER_COMMIT = "cafeb36a21782df925972006dc8a77ea52a36e35";
+const MULTIPLAYER_COMMIT = "a9623217d23678093dd3c7475d05290d18e6c0db";
 // The jsPsych#3694 preview build that commit's examples and vendored core are pinned to.
 const JSPSYCH_PREVIEW = "1e77da41966f22832ee0d133d137d81b3e50639a";
 const JSPSYCH_PLUGINS = {
