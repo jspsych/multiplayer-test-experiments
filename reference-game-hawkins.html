@@ -538,6 +538,9 @@
 
     jsPsych.data.addProperties({
       experiment_file: "reference-game-hawkins.html",
+      // One ID per page load, on every row, so a participant who never gets a multiplayer session
+      // (connect error, no partner) can still be grouped. A reload starts a new one.
+      result_uid: jsPsych.randomization.randomID(16),
       study_variant: CONFIG.PILOT_LABEL,
       deployment: onJatos ? "jatos" : "local",
       config_blocks: CONFIG.BLOCKS,
@@ -1682,9 +1685,7 @@
         prolific_pid: prolific.pid,
         study_id: prolific.study,
         session_id: prolific.session,
-        // Set from page load, so a participant who never gets a multiplayer session (connect error,
-        // no partner) still has one ID shared by all of their rows. A reload starts a new one.
-        result_uid: jsPsych.randomization.randomID(16),
+        // Read here, not at page load: jatos.js sets it only once it has loaded.
         jatos_study_result_id: onJatos ? (jatos.studyResultId ?? null) : null,
       });
 
