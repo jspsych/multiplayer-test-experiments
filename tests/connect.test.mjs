@@ -107,6 +107,7 @@ test("a successful connect builds the shared schedules for the practice and game
   assert.equal(state.practiceLoop.timeline_variables, state.PRACTICE_SCHEDULE);
   assert.equal(run.storage.get("hawkins-connected"), "1");
   assert.deepEqual(JSON.parse(JSON.stringify(run.added)), [
+    { multiplayer_participant_id: "p1", multiplayer_session_id: "s1" },
     { config_trials: 6, assigned_target_ids: ["A", "C"], practice_target_ids: ["B"] },
   ]);
   // Main rounds keep round 0..5; the practice round's ID is below them.
@@ -158,6 +159,16 @@ test("a failed connect routes to the no-match exit", async () => {
   assert.deepEqual(await run.connect(), { connection: "connect_error" });
   assert.equal(run.state().noMatchReason, "connect_error");
   assert.equal(run.state().SCHEDULE.length, 0);
+  // No session, so no session IDs to back-fill.
+  assert.deepEqual(run.added, []);
+});
+
+test("a reloaded tab also back-fills its session IDs onto its earlier rows", async () => {
+  const run = setup({ restarted: true, stored: "1", participantId: "p2", sessionId: "s9" });
+  await run.connect();
+  assert.deepEqual(JSON.parse(JSON.stringify(run.added)), [
+    { multiplayer_participant_id: "p2", multiplayer_session_id: "s9" },
+  ]);
 });
 
 test("a reloaded tab is detected as a restart, skips the instructions and withdraws its ready flags", async () => {
