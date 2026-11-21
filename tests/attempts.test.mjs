@@ -201,6 +201,7 @@ function runStart({
     admittedToPairing: false,
     datapipeEnabled: true,
     onJatos: true,
+    jatos: { studyResultId: 77 },
     pipeParams: {},
     CONFIG: { COMPLETION_CODES: { complete: "C1", reloaded: "C5" } },
     ALREADY_FINISHED_HTML: "<h2>already finished</h2>",
