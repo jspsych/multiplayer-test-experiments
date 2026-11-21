@@ -1370,6 +1370,13 @@
 
       participantId = jsPsych.multiplayer.participantId;
       dyadId = jsPsych.multiplayer.sessionId;
+      // The core stamps these IDs only on rows recorded while connected. addProperties also writes
+      // them onto the rows already recorded (preload, instructions, quiz), so every row of a
+      // flattened export can still be tied to its dyad. Same keys and values the core uses.
+      jsPsych.data.addProperties({
+        multiplayer_participant_id: participantId,
+        multiplayer_session_id: dyadId,
+      });
 
       if (jsPsych.multiplayer.restarted) {
         reloaded = true;
@@ -1441,6 +1448,10 @@
         prolific_pid: prolific.pid,
         study_id: prolific.study,
         session_id: prolific.session,
+        // Set from page load, so a participant who never gets a multiplayer session (connect error,
+        // no partner) still has one ID shared by all of their rows. A reload starts a new one.
+        result_uid: jsPsych.randomization.randomID(16),
+        jatos_study_result_id: onJatos ? (jatos.studyResultId ?? null) : null,
       });
 
       await jsPsych.run([
