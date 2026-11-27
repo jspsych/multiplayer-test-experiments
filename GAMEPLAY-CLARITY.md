@@ -27,8 +27,11 @@ The number-correct panel starts each round at the count of saved `correct: true`
 rows have `correct: null`). A correct round adds one during feedback. The panel is recomputed from
 the saved count on every refresh, so a round is never counted twice.
 
-The role-specific shape highlights are unchanged. The director's recap now points to the result
-message instead of the score, because green on the director's screen marks the matcher's pick.
+Feedback lasts 4s (`CONFIG.ROUND_FEEDBACK_MS`). On the director's screen the target keeps its
+yellow outline during feedback, and a wrong pick is outlined in blue. After a wrong pick the two
+cells are labelled "Your target" and "Partner's choice" on their top borders (the page sets
+`hk-result-wrong` on the game root). The matcher sees the true target in green and a wrong click
+in blue. The director's recap describes the yellow and blue outlines.
 
 ## Chat
 

@@ -116,6 +116,6 @@ and `{ waiting_ready_for_main, ready_wait_ms }`, with `waiting_ready_for_main` o
 
 ## Time and payment
 
-The walkthrough, two timed practice rounds (up to 2 × 60s plus 3s of feedback each), the transition
+The walkthrough, two timed practice rounds (up to 2 × 60s plus 4s of feedback each), the transition
 screen and up to two barrier waits (each now up to 3 minutes) add to the session. The advertised
 duration and the reward (DECISIONS.md B1, B5) need to include that time.

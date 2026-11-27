@@ -84,24 +84,33 @@
         border-color: #2b8a3e;
         box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35);
       }
-      body[data-role="director"] .jspsych-multiplayer-reference-game:has(.hk-round-note.is-wrong)
+      /* After a wrong pick, the Director's two outlined cells are labelled. HawkinsUI.result sets
+         `hk-result-wrong` on the game root (no `:has()`, which older browsers drop silently). The
+         label sits on the cell's top border, mostly over the cell padding and the grid gap, so it
+         does not cover the tangram. */
+      body[data-role="director"] .jspsych-multiplayer-reference-game.hk-result-wrong
         :is(.jspsych-multiplayer-reference-game-cell.is-target, .jspsych-multiplayer-reference-game-cell.is-wrong)::after {
         position: absolute;
-        inset: auto 0 0;
-        padding: 2px;
+        top: 0;
+        left: 50%;
+        transform: translate(-50%, -75%);
+        padding: 0 6px;
+        border-radius: 8px;
         background: #fff;
         color: #222;
-        font: bold 13px/1.25 system-ui, sans-serif;
-        text-align: center;
+        font: bold 11px/14px system-ui, sans-serif;
+        white-space: nowrap;
         pointer-events: none;
       }
-      body[data-role="director"] .jspsych-multiplayer-reference-game:has(.hk-round-note.is-wrong)
+      body[data-role="director"] .jspsych-multiplayer-reference-game.hk-result-wrong
         .jspsych-multiplayer-reference-game-cell.is-target::after {
         content: "Your target";
+        border: 1px solid #e8a417;
       }
-      body[data-role="director"] .jspsych-multiplayer-reference-game:has(.hk-round-note.is-wrong)
+      body[data-role="director"] .jspsych-multiplayer-reference-game.hk-result-wrong
         .jspsych-multiplayer-reference-game-cell.is-wrong::after {
         content: "Partner's choice";
+        border: 1px solid #1971c2;
       }
 
       /* ROUND HEADER (hawkins-ui.js): trial progress, number correct and time remaining in separate
@@ -343,8 +352,8 @@
     //     per-round log and a typing indicator (sharedUtils/clientBase.js `playerTyping`).
     //   • The matcher cannot click until the director has sent a message that round
     //     (game.client.js gates the click on `globalGame.messageSent`).
-    //   Four seconds of feedback. The Director keeps the yellow target cue and sees a wrong
-    //   pick in blue. The Matcher sees the correct shape in green and a wrong pick in blue.
+    //   • Feedback after every choice: the matcher sees the true target in green and, if they
+    //     missed, their click in blue.
     //   • A round counter and running score shown throughout (`newRoundUpdate`).
     //
     // Differs from the original:
@@ -368,6 +377,12 @@
     //      practice rounds on tangrams that are not targets in the dyad's main schedule. Practice
     //      rows are saved with `phase: "practice"` and never count toward the main game
     //      (WALKTHROUGH-PRACTICE.md).
+    //   6. Feedback lasts 4s (`CONFIG.ROUND_FEEDBACK_MS`) instead of 3000ms, with a larger, tinted
+    //      "Correct!" / "Incorrect." / "Time's up!" message. The original director saw the
+    //      matcher's pick in green whether or not it was right, with the running score as the only
+    //      accuracy signal. Here the director's target keeps its yellow cue, a wrong pick is
+    //      outlined in blue, and after a wrong pick both cells are labelled ("Your target",
+    //      "Partner's choice").
     //
     // Key DVs, logged per round: message_count / messages_sent (a words-per-reference proxy),
     // correct, rt.
