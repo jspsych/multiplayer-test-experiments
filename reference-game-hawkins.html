@@ -71,27 +71,37 @@
       .jspsych-multiplayer-reference-game img[src$="tangram_K.png"] { width: 61.60%; aspect-ratio: 184.8 / 280; }
       .jspsych-multiplayer-reference-game img[src$="tangram_L.png"] { width: 60.90%; aspect-ratio: 182.7 / 280.7; }
 
-      /* FEEDBACK COLOUR. During the round, the director's target stays the plugin amber/yellow.
-         After a choice, the matcher sees the true target in green (`is-target`) and their own
-         click in blue when it is wrong (`is-wrong`). The director still sees the matcher's pick
-         in green either way, as in the original (score is the accuracy signal on that side). */
+      /* Keep the Director's live target cue during feedback. Blue identifies a wrong pick. */
       .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-wrong {
-        border-color: #2b8a3e;
-        box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35);
+        border-color: #1971c2;
+        box-shadow: 0 0 0 2px rgba(25, 113, 194, 0.35);
       }
-      .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-mark.is-wrong {
-        background: #2b8a3e;
+      body[data-role="director"] .jspsych-multiplayer-reference-game-cell.is-target.is-correct {
+        border-color: #e8a417;
+        box-shadow: 0 0 0 2px rgba(232, 164, 23, 0.35);
       }
       body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-target {
         border-color: #2b8a3e;
         box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35);
       }
-      body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-cell.is-wrong {
-        border-color: #1971c2;
-        box-shadow: 0 0 0 2px rgba(25, 113, 194, 0.35);
+      body[data-role="director"] .jspsych-multiplayer-reference-game:has(.hk-round-note.is-wrong)
+        :is(.jspsych-multiplayer-reference-game-cell.is-target, .jspsych-multiplayer-reference-game-cell.is-wrong)::after {
+        position: absolute;
+        inset: auto 0 0;
+        padding: 2px;
+        background: #fff;
+        color: #222;
+        font: bold 13px/1.25 system-ui, sans-serif;
+        text-align: center;
+        pointer-events: none;
       }
-      body[data-role="matcher"] .jspsych-multiplayer-reference-game .jspsych-multiplayer-reference-game-mark.is-wrong {
-        background: #1971c2;
+      body[data-role="director"] .jspsych-multiplayer-reference-game:has(.hk-round-note.is-wrong)
+        .jspsych-multiplayer-reference-game-cell.is-target::after {
+        content: "Your target";
+      }
+      body[data-role="director"] .jspsych-multiplayer-reference-game:has(.hk-round-note.is-wrong)
+        .jspsych-multiplayer-reference-game-cell.is-wrong::after {
+        content: "Partner's choice";
       }
 
       /* ROUND HEADER (hawkins-ui.js): trial progress, number correct and time remaining in separate
@@ -138,19 +148,24 @@
       /* The round's result under the panels during feedback: "Correct!", "Incorrect." or
          "Time's up! …". A timeout is amber, not the red of an incorrect choice. */
       .hk-round-note {
-        min-height: 1.35em;
-        margin: 0.2em 0;
-        font-size: 24px;
+        min-height: 36px;
+        margin: 4px 0;
+        font-size: 30px;
+        line-height: 1.2;
+        border-radius: 6px;
         font-weight: bold;
       }
       .hk-round-note.is-correct {
         color: #2b8a3e;
+        background: #eaf6ed;
       }
       .hk-round-note.is-wrong {
         color: #c92a2a;
+        background: #fff0f0;
       }
       .hk-round-note.is-timeout {
         color: #9c5400;
+        background: #fff4df;
       }
 
       /* CHAT LABELS (hawkins-ui.js): a heading over the conversation, with a hint while it is empty,
@@ -328,9 +343,8 @@
     //     per-round log and a typing indicator (sharedUtils/clientBase.js `playerTyping`).
     //   • The matcher cannot click until the director has sent a message that round
     //     (game.client.js gates the click on `globalGame.messageSent`).
-    //   • Feedback: director sees the matcher's pick (green either way); matcher sees the true
-    //     target in green and, if they missed, their click in blue. The running score is the
-    //     accuracy signal. 3000ms of feedback before the next round.
+    //   Four seconds of feedback. The Director keeps the yellow target cue and sees a wrong
+    //   pick in blue. The Matcher sees the correct shape in green and a wrong pick in blue.
     //   • A round counter and running score shown throughout (`newRoundUpdate`).
     //
     // Differs from the original:
@@ -398,6 +412,7 @@
       // Backstop `round_timeout` after the limit, for when the matcher's submission never arrives
       // (e.g. a frozen tab). That round ends without feedback, still as a timeout.
       ROUND_TIMEOUT_GRACE_MS: 5000,
+      ROUND_FEEDBACK_MS: 4000,
       // "Are you still with us?" reminder during rounds (presence-check.js): shown after this long
       // with no activity, closed as missed if its button is not clicked in time. Never ends the game.
       PRESENCE_PROMPT_MS: 30000,
@@ -850,9 +865,9 @@
                  shape so your partner can pick it out of the lineup of ${SHAPES.length}.</p>
               <p>Use the <strong>chat box below the shapes</strong>. You <strong>must send at least one
                  message every round</strong> — your partner can't click until you do.</p>
-              <p>After each choice you'll see your partner's pick outlined in green. Green on your
-                 screen marks their pick, not necessarily the right answer. The message above the
-                 shapes says <strong>Correct!</strong> or <strong>Incorrect.</strong></p>
+              <p>After each choice, the result appears above the shapes. Your target stays
+                 <strong>yellow</strong>. If your partner picks a different shape, their choice
+                 is outlined in <strong>blue</strong>.</p>
               <p>You will stay the <strong>Director for the whole game</strong>.
                  Roles do not switch.</p>`;
             const matcherCopy = `
@@ -1027,7 +1042,7 @@
         director: { reveal_target: false, show_score: false, show_partner_choice: true },
         matcher: { reveal_target: true, show_score: false, show_partner_choice: true },
       },
-      feedback_duration: 3000,
+      feedback_duration: CONFIG.ROUND_FEEDBACK_MS,
       // The matcher's timer submits the (empty) choice so both players reach feedback together.
       selection_timeout: CONFIG.ROUND_TIMEOUT_MS,
       round_timeout: CONFIG.ROUND_TIMEOUT_MS + CONFIG.ROUND_TIMEOUT_GRACE_MS,
