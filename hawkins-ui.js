@@ -88,6 +88,10 @@
       note.classList.toggle("is-wrong", kind === "incorrect");
       note.classList.toggle("is-timeout", kind === "timeout");
     }
+    // Lets the page label the Director's outlined cells after a wrong pick. The plugin rebuilds
+    // the game root each round, so the class never carries over.
+    const game = display.querySelector(".jspsych-multiplayer-reference-game");
+    if (game) game.classList.toggle("hk-result-wrong", kind === "incorrect");
     const score = display.querySelector("#hk-score");
     if (score) score.textContent = String(Number(score.dataset.score) + (kind === "correct" ? 1 : 0));
   }

@@ -11,7 +11,7 @@ import "../hawkins-ui.js";
 const { HawkinsUI, Hawkins } = globalThis;
 
 // Stand-ins for the elements hawkins-ui.js and the page's on_load touch.
-const SELECTORS = ["#round-remaining", "#round-note", "#hk-score", ".hk-timer", "#hk-time-hint"];
+const SELECTORS = ["#round-remaining", "#round-note", "#hk-score", ".hk-timer", "#hk-time-hint", ".jspsych-multiplayer-reference-game"];
 function fakeDisplay(score = 3) {
   const nodes = Object.fromEntries(SELECTORS.map((key) => {
     const classes = new Set();
@@ -57,7 +57,10 @@ test("a wrong choice says Incorrect and keeps the score", () => {
   HawkinsUI.result(d, "incorrect");
   assert.equal(d.nodes["#round-note"].textContent, "Incorrect.");
   assert(d.nodes["#round-note"].classes.has("is-wrong"));
+  assert(d.nodes[".jspsych-multiplayer-reference-game"].classes.has("hk-result-wrong"));
   assert.equal(d.nodes["#hk-score"].textContent, "3");
+  HawkinsUI.result(d, "timeout");
+  assert(!d.nodes[".jspsych-multiplayer-reference-game"].classes.has("hk-result-wrong"));
 });
 
 test("the timer warning shows in the last seconds of a running round only", () => {
