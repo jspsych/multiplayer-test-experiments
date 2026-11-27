@@ -318,8 +318,11 @@ can reduce the number of dyads that must be started to reach the same number of 
 
 A 33% Prolific service fee applies on top of participant pay throughout.
 
-**Hawkins, proposed 3-block pilot** (~30 min placeholder, set for the earlier 36-round design and not yet
-re-estimated: instructions + comprehension + lobby + 18 single-target rounds) → $7.50/participant, **$9.98 all-in**. Attrition is multiplicative on dyads;
+**Hawkins, proposed 3-block pilot** (~30 min, proposed: instructions + comprehension + lobby +
+walkthrough + 2 practice and 18 single-target rounds). Six completed pilot sessions (three dyads, 3s
+feedback) took 19.7–38.3 min per participant from page load to the last saved row, with a median of
+about 25 min. The longest spent ~14 min before the first round. Feedback is now 4s, which adds
+about 20s over 20 rounds, so ~30 min still covers a typical session. → $7.50/participant, **$9.98 all-in**. Attrition is multiplicative on dyads;
 until the first pilot measures it directly, assume something between the old C&WG estimate and the
 full Hawkins estimate. At ~20% per-participant mid-task dropout, dyad survival ≈ 0.64:
 
